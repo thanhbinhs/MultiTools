@@ -1,37 +1,87 @@
-# MultiTools - Công cụ chỉnh sửa và thiết kế đa phương tiện.
 
-### Các chức năng chính:
+# MultiTools - Công Cụ Chỉnh Sửa và Thiết Kế Đa Phương Tiện
 
-- chỉnh sửa hình ảnh
-- chỉnh sửa video
-- chỉnh sửa audio
-- convert files
-- AI generator (coming soon...)
+### **Các Chức Năng Chính**
 
----
-
-## Setup project
-
-### Yêu cầu:
-
-- Thiết bị đã cài đặt nodejs, python, ffmpeg (công cụ nền tảng xử lý tệp âm thanh).
-- Thiết bị đã cài đặt mongoDB với port mặc định và tạo một database trống có tên `mydatabase` (nếu chưa cài, có thể tham khảo hướng dẫn trong video này: https://www.youtube.com/watch?v=RmPp69cwNgg)
-- Sử dụng VS Code để chạy dự án.
+- Chỉnh sửa hình ảnh.
+- Chỉnh sửa video.
+- Chỉnh sửa âm thanh.
+- Chuyển đổi định dạng tệp.
+- AI Generator (sắp ra mắt...).
 
 ---
 
-#### **Các bước setup**
+## **Hướng Dẫn Thiết Lập Dự Án**
 
-1. Clone dự án về
-2. Mở dự án bằng VSCode
-3. Mở terminal và vào thư mục frontend để cài đặt các thư viện UI và phụ thuộc: `cd frontend`
-4. Cài đặt node-modules bằng cách chạy lệnh: `npm install`
-5. Bước này có thể sẽ chạy ra kết quả là tìm thấy 1 lỗ hổng bảo mật, nếu không thấy lỗi gì vui lòng bỏ qua bước này và chuyển tới bước 6. Nếu có thông báo lỗi, làm theo hướng dẫn để fix hoặc chạy `npm audit fix` để sửa 1 phần, hoặc `npm audit fix --force` để sửa all (recommend).
-6. Điều hướng từ thu mục frontend sang thư mục backend: `cd ../backend`
-7. Tạo môi trường python ảo bằng lệnh:  `python -m venv venv`
-8. Kích hoạt môi trường python ảo, sau khi kích hoạt sẽ hiển thị môi trường đang sử dụng màu xanh (venv)): `venv/Scripts/activate`
-9. Cài đặt các thư viện cần thiết từ file requirements: `pip install -r requirements.txt`
-10. Khởi động kết nối tới mongoDB qua extension **MongoDB for VS Code**
-11. Trong terminal của dự án, tiếp tục điều hướng từ thư mục backend tới thư mục frontend để chạy dự án: `cd ../frontend`
-12. Chạy lệnh `npm run all` để khởi động localhost (ở đây là `http://localhost:3000`).
-    => truy cập liên kết tương ứng để xem kết quả trên trình duyệt
+### **Yêu Cầu Hệ Thống**
+
+- Cài đặt sẵn **Node.js**, **Python**, và **FFmpeg** (công cụ xử lý âm thanh và video).
+- Cài đặt **MongoDB** với cổng mặc định và tạo một cơ sở dữ liệu trống tên là `mydatabase`. (Nếu chưa cài đặt, tham khảo video hướng dẫn: [Tại đây](https://www.youtube.com/watch?v=RmPp69cwNgg)).
+- Sử dụng **Visual Studio Code (VS Code)** để làm việc với dự án.
+
+---
+
+### **Các Bước Thiết Lập**
+
+1. **Clone dự án về máy:**
+   ```bash
+   git clone https://github.com/thanhbinhs/MultiTools.git
+   ```
+2. **Mở dự án bằng VS Code.**
+3. **Cài đặt thư viện UI và các phụ thuộc:**
+   - Mở terminal, điều hướng vào thư mục frontend:
+     ```bash
+     cd frontend
+     ```
+   - Cài đặt node modules:
+     ```bash
+     npm install
+     ```
+4. **Kiểm tra lỗ hổng bảo mật:**
+   - Nếu không có lỗi, bỏ qua bước này.
+   - Nếu có cảnh báo về lỗ hổng bảo mật, sửa lỗi bằng một trong các lệnh sau:
+     ```bash
+     npm audit fix
+     npm audit fix --force # (để sửa tất cả)
+     ```
+5. **Cài đặt môi trường backend:**
+   - Quay lại thư mục backend:
+     ```bash
+     cd ../backend
+     ```
+   - Tạo môi trường ảo Python:
+     ```bash
+     python -m venv venv
+     ```
+   - Kích hoạt môi trường ảo:
+     - **Windows:**
+       ```bash
+       venv\Scripts\activate
+       ```
+     - **macOS/Linux:**
+       ```bash
+       source venv/bin/activate
+       ```
+     - Khi kích hoạt thành công, bạn sẽ thấy tên môi trường hiển thị trong terminal (ví dụ: `(venv)`).
+   - Cài đặt các thư viện cần thiết từ file `requirements.txt`:
+     ```bash
+     pip install -r requirements.txt
+     ```
+6. **Kết nối MongoDB:**
+   - Sử dụng extension **MongoDB for VS Code** để khởi động kết nối tới cơ sở dữ liệu.
+7. **Khởi động dự án:**
+   - Điều hướng từ thư mục backend về lại frontend:
+     ```bash
+     cd ../frontend
+     ```
+   - Chạy dự án:
+     ```bash
+     npm run all
+     ```
+   - Truy cập ứng dụng tại: [http://localhost:3000](http://localhost:3000).
+
+---
+
+### **Liên Hệ Hỗ Trợ**
+
+- Nếu gặp bất kỳ vấn đề nào, vui lòng liên hệ nhóm phát triển qua email hoặc trên repository.
