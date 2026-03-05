@@ -1,73 +1,73 @@
-// FilterVideo.jsx
-
+// functions/FilterVideo.jsx
 import React, { useContext } from "react";
 import { FaMagic, FaMoon, FaSun, FaTimes } from "react-icons/fa";
-import "../css/menuEditor.css"; // Ensure this CSS file exists and is correctly styled
-import { VideoContext } from "@/context/VideoContext";
 import { FaSpinner } from "react-icons/fa6";
+import "../css/menuEditor.css";
+import { VideoContext } from "@/context/VideoContext";
+
+const SliderRow = ({ label, value, min, max, onChange }) => (
+  <div className="slider-group">
+    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+      <label>{label}</label>
+      <label style={{ fontVariantNumeric: "tabular-nums", minWidth: 36, textAlign: "right" }}>
+        {Number(value).toFixed(0)}
+      </label>
+    </div>
+    <input
+      type="range"
+      min={min}
+      max={max}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="slider__balance"
+    />
+  </div>
+);
 
 const FilterVideo = ({ onClose }) => {
   const {
     adjustmentData,
     updateAdjustmentData,
     resetAdjustmentData,
-    handleAdjustment, // Optional: may not be needed
-    isProcessing, // Optional: may not be needed
+    handleAdjustment,
+    isProcessing,
   } = useContext(VideoContext);
 
-  // Handlers for individual adjustments
-  const setBrightness = (value) => updateAdjustmentData("brightness", value);
-  const setSaturation = (value) => updateAdjustmentData("saturation", value);
-  const setContrast = (value) => updateAdjustmentData("contrast", value);
-  const setHue = (value) => updateAdjustmentData("hue", value);
-  const setGreyScale = (value) => updateAdjustmentData("grey_scale", value);
-  const setSepia = (value) => updateAdjustmentData("sepia", value);
-  const setInvert = (value) => updateAdjustmentData("invert", value);
-  const setBlur = (value) => updateAdjustmentData("blur", value);
+  const set = (key) => (val) => updateAdjustmentData(key, val);
 
-  // Preset: Auto Adjust
   const autoAdjust = () => {
-    // Example auto-adjust values
-    const autoBrightness = 120;
-    const autoContrast = 110;
-    const autoSaturation = 115;
-    const grey_scale = 0;
-
-    updateAdjustmentData("brightness", autoBrightness);
-    updateAdjustmentData("contrast", autoContrast);
-    updateAdjustmentData("saturation", autoSaturation);
-    updateAdjustmentData("grey_scale", grey_scale);
+    updateAdjustmentData("brightness", 115);
+    updateAdjustmentData("contrast",   108);
+    updateAdjustmentData("saturation", 112);
+    updateAdjustmentData("grey_scale", 0);
   };
 
-  // Preset: Toggle Grayscale
-  const toggleGrayscale = () => {
-    const newGrayscale = adjustmentData.grey_scale >= 50 ? 0 : 100;
-    updateAdjustmentData("grey_scale", newGrayscale);
-  };
+  const toggleGrayscale = () =>
+    updateAdjustmentData("grey_scale", adjustmentData.grey_scale >= 50 ? 0 : 100);
 
-  // Preset: Pop Image
   const popImage = () => {
-    const popBrightness = 150;
-    const popContrast = 120;
-    const popSaturation = 125;
-    const grey_scale = 0;
+    updateAdjustmentData("brightness", 115);
+    updateAdjustmentData("contrast",   125);
+    updateAdjustmentData("saturation", 130);
+    updateAdjustmentData("grey_scale", 0);
+  };
 
-    updateAdjustmentData("brightness", popBrightness);
-    updateAdjustmentData("contrast", popContrast);
-    updateAdjustmentData("saturation", popSaturation);
-    updateAdjustmentData("grey_scale", grey_scale);
+  const handleCancel = () => {
+    resetAdjustmentData();
+    onClose?.();
   };
 
   return (
     <div className="tool-drawer">
       <div className="tool-name">
-        <div></div>
+        <div />
         Điều chỉnh màu video
-        <button onClick={onClose} className="icon-cancel" id="icon-cancel">
+        <button onClick={handleCancel} className="icon-cancel" id="icon-cancel">
           <FaTimes />
         </button>
       </div>
-      <div className="splitter"></div>
+      <div className="splitter" />
+
       <div className="box__option">
         <button className="btn" onClick={autoAdjust}>
           <FaMagic /> Tự động
@@ -76,148 +76,36 @@ const FilterVideo = ({ onClose }) => {
           <FaMoon /> Trắng Đen
         </button>
         <button className="btn" onClick={popImage}>
-          <FaSun /> Bật ra
+          <FaSun /> Bật nổi
         </button>
       </div>
 
       <div className="box--basic slider-section">
-        <h4 className="box__header">Màu</h4>
+        <h4 className="box__header">Màu sắc</h4>
 
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Độ sáng</label>
-            <label>{adjustmentData.brightness}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={adjustmentData.brightness}
-            onChange={(e) => setBrightness(e.target.value)}
-            className="slider__balance"
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Độ tương phản</label>
-            <label>{adjustmentData.saturation}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={adjustmentData.saturation}
-            onChange={(e) => setSaturation(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Độ bão hòa màu</label>
-            <label>{adjustmentData.contrast}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={adjustmentData.contrast}
-            onChange={(e) => setContrast(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Sắc độ</label>
-            <label>{adjustmentData.hue}</label>
-          </div>
-          <input
-            type="range"
-            min="-180"
-            max="180"
-            value={adjustmentData.hue}
-            onChange={(e) => setHue(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Thang màu xám</label>
-            <label>{adjustmentData.grey_scale}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={adjustmentData.grey_scale}
-            onChange={(e) => setGreyScale(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Hiệu ứng cổ điển</label>
-            <label>{adjustmentData.sepia}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={adjustmentData.sepia}
-            onChange={(e) => setSepia(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Đảo ngược màu</label>
-            <label>{adjustmentData.invert}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={adjustmentData.invert}
-            onChange={(e) => setInvert(e.target.value)}
-          />
-          </div>
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Mờ</label>
-            <label>{adjustmentData.blur}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={adjustmentData.blur}
-            onChange={(e) => setBlur(e.target.value)}
-          />
-          </div>
+        <SliderRow label="Độ sáng"        value={adjustmentData.brightness} min={0}    max={200} onChange={set("brightness")} />
+        <SliderRow label="Độ tương phản"  value={adjustmentData.contrast}   min={0}    max={200} onChange={set("contrast")} />   {/* fixed swap */}
+        <SliderRow label="Độ bão hòa màu" value={adjustmentData.saturation} min={0}    max={200} onChange={set("saturation")} /> {/* fixed swap */}
+        <SliderRow label="Sắc độ (Hue)"   value={adjustmentData.hue}        min={-180} max={180} onChange={set("hue")} />
+        <SliderRow label="Thang xám"      value={adjustmentData.grey_scale} min={0}    max={100} onChange={set("grey_scale")} />
+        <SliderRow label="Cổ điển (Sepia)" value={adjustmentData.sepia}     min={0}    max={100} onChange={set("sepia")} />
+        <SliderRow label="Đảo ngược màu"  value={adjustmentData.invert}     min={0}    max={100} onChange={set("invert")} />
+        <SliderRow label="Làm mờ (Blur)"  value={adjustmentData.blur}       min={0}    max={20}  onChange={set("blur")} />
       </div>
 
       <div className="bottom-content">
         <div className="action-btn">
-          <button id="filter-action-cancel" onClick={resetAdjustmentData}>
+          <button id="filter-action-cancel" onClick={handleCancel}>
             Hủy
           </button>
-          {isProcessing ? (
-            <button
-              id="filter-action-apply"
-              disabled
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-            >
-              <FaSpinner className="removebg-icon spinner" /> Áp dụng
-            </button>
-          ) : (
-            <button id="filter-action-apply" onClick={handleAdjustment}>
-              Áp dụng
-            </button>
-          )}
+          <button
+            id="filter-action-apply"
+            onClick={handleAdjustment}
+            disabled={isProcessing}
+            style={isProcessing ? { display: "flex", justifyContent: "center", alignItems: "center", gap: 6 } : {}}
+          >
+            {isProcessing ? <><FaSpinner className="spinner" /> Đang xử lý…</> : "Áp dụng"}
+          </button>
         </div>
       </div>
     </div>

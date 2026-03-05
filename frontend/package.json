@@ -9,7 +9,7 @@
         "start": "next start",
         "lint": "next lint",
         "frontend": "npm run dev",
-        "python-backend": "cd ../backend && venv\\Scripts\\activate && python run.py",
+        "python-backend": "cd ../backend && source env/bin/activate && python run.py",
         "nodejs-backend": "nodemon ../frontend/nodejs/server.js",
         "all": "concurrently \"npm run frontend\" \"npm run python-backend\" \"npm run nodejs-backend\""
     },

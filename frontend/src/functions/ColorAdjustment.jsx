@@ -1,205 +1,161 @@
-import React, { useState, useContext } from "react";
+// functions/ColorAdjustment.jsx
+import React, { useContext, useState } from "react";
 import { FaMagic, FaMoon, FaSun, FaTimes } from "react-icons/fa";
-import "../css/menuEditor.css"; // Import file CSS để tạo style
+import "../css/menuEditor.css";
 import { ImageContext } from "@/context/ImageContext";
 
-const ColorAdjustment = () => {
+// ── Slider row helper ─────────────────────────────────────────────────────────
+const SliderRow = ({ label, value, min, max, onChange }) => (
+  <div className="slider-group ie-slider-group">
+    <div className="ie-slider-head">
+      <label>{label}</label>
+      <label className="ie-slider-value">
+        {Number(value).toFixed(0)}
+      </label>
+    </div>
+    <input
+      type="range"
+      min={min}
+      max={max}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="slider__balance"
+    />
+  </div>
+);
+
+const ColorAdjustment = ({ onClose }) => {
   const {
+    currentImage,
     adjustmentData,
     updateAdjustmentData,
     resetAdjustmentData,
     handleAdjustment,
   } = useContext(ImageContext);
+  const [applying, setApplying] = useState(false);
 
-  const setBrightness = (value) => updateAdjustmentData("brightness", value);
-  const setSaturation = (value) => updateAdjustmentData("saturation", value);
-  const setContrast = (value) => updateAdjustmentData("contrast", value);
-  const setHue = (value) => updateAdjustmentData("hue", value);
-  const setGreyScale = (value) => updateAdjustmentData("grey_scale", value);
-  const setSepia = (value) => updateAdjustmentData("sepia", value);
-  const setInvert = (value) => updateAdjustmentData("invert", value);
-  const setBlur = (value) => updateAdjustmentData("blur", value)
+  const set = (key) => (val) => updateAdjustmentData(key, val);
 
+  // ── Presets ─────────────────────────────────────────────────────────────────
   const autoAdjust = () => {
-    // Ví dụ các giá trị tự động có thể là những giá trị đã được thử nghiệm
-    const autoBrightness = 120; // Tăng độ sáng lên một mức
-    const autoContrast = 110; // Tăng độ tương phản nhẹ
-    const autoSaturation = 115; // Tăng độ bão hòa màu nhẹ
-    const grayscale = 0; // Không chuyển sang màu xám
-
-    // Cập nhật các giá trị điều chỉnh vào adjustmentData
-    updateAdjustmentData("brightness", autoBrightness);
-    updateAdjustmentData("contrast", autoContrast);
-    updateAdjustmentData("saturation", autoSaturation);
-    updateAdjustmentData("grey_scale", grayscale);
+    updateAdjustmentData("brightness", 115);
+    updateAdjustmentData("contrast",   108);
+    updateAdjustmentData("saturation", 112);
+    updateAdjustmentData("grey_scale", 0);
   };
 
-  const toggleGrayscale = () => {
-    const newGrayscale = adjustmentData.grey_scale >= 50 ? 0 : 100;
-
-    // Cập nhật giá trị grayscale trong adjustmentData
-    updateAdjustmentData("grey_scale", newGrayscale);
-  };
+  const toggleGrayscale = () =>
+    updateAdjustmentData("grey_scale", adjustmentData.grey_scale >= 50 ? 0 : 100);
 
   const popImage = () => {
-    // Tăng cường các giá trị để làm nổi bật hình ảnh
-    const popBrightness = 150; // Tăng độ sáng lên
-    const popContrast = 120; // Tăng độ tương phản lên
-    const popSaturation = 125; // Tăng độ bão hòa màu
-    const grey_scale = 0; // Không chuyển sang màu xám
+    updateAdjustmentData("brightness", 115);
+    updateAdjustmentData("contrast",   125);
+    updateAdjustmentData("saturation", 130);
+    updateAdjustmentData("grey_scale", 0);
+  };
 
-    // Cập nhật các giá trị đã tăng cường
-    updateAdjustmentData("brightness", popBrightness);
-    updateAdjustmentData("contrast", popContrast);
-    updateAdjustmentData("saturation", popSaturation);
-    updateAdjustmentData("grey_scale", grey_scale);
+  const handleCancel = () => {
+    resetAdjustmentData();
+    onClose?.();
+  };
+
+  const handleApply = async () => {
+    if (!currentImage || applying) return;
+    setApplying(true);
+    try {
+      await handleAdjustment();
+    } finally {
+      setApplying(false);
+    }
   };
 
   return (
     <div className="tool-drawer">
       <div className="tool-name">
-        <div></div>
+        <div />
         Điều chỉnh màu
-        <button onClick={{}} className="icon-cancel" id="icon-cancel">
+        <button type="button" onClick={handleCancel} className="icon-cancel" id="icon-cancel">
           <FaTimes />
         </button>
       </div>
-      <div className="splitter"></div>
-      <div className="box__option">
-        <button className="btn" onClick={() => autoAdjust()}>
+      <div className="splitter" />
+
+      {!currentImage && (
+        <p className="ie-empty-message">Chưa có ảnh để điều chỉnh màu.</p>
+      )}
+
+      <div className="box__option ie-quick-actions">
+        <button type="button" className="btn" onClick={autoAdjust} disabled={!currentImage || applying}>
           <FaMagic /> Tự động
         </button>
-        <button className="btn" onClick={() => toggleGrayscale()}>
+        <button type="button" className="btn" onClick={toggleGrayscale} disabled={!currentImage || applying}>
           <FaMoon /> Trắng Đen
         </button>
-        <button className="btn" onClick={() => popImage()}>
-          <FaSun /> Bật ra
+        <button type="button" className="btn" onClick={popImage} disabled={!currentImage || applying}>
+          <FaSun /> Bật nổi
         </button>
       </div>
 
       <div className="box--basic slider-section">
-        <h4 className="box__header">Màu</h4>
+        <h4 className="box__header">Màu sắc</h4>
 
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Độ sáng</label>
-            <label>{adjustmentData.brightness}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={adjustmentData.brightness}
-            onChange={(e) => setBrightness(e.target.value)}
-            className="slider__balance"
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Độ tương phản</label>
-            <label>{adjustmentData.saturation}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={adjustmentData.saturation}
-            onChange={(e) => setSaturation(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Độ bão hòa màu</label>
-            <label>{adjustmentData.contrast}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={adjustmentData.contrast}
-            onChange={(e) => setContrast(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Sắc độ</label>
-            <label>{adjustmentData.hue}</label>
-          </div>
-          <input
-            type="range"
-            min="-180"
-            max="180"
-            value={adjustmentData.hue}
-            onChange={(e) => setHue(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Thang màu xám</label>
-            <label>{adjustmentData.grey_scale}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={adjustmentData.grey_scale}
-            onChange={(e) => setGreyScale(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Hiệu ứng cổ điển</label>
-            <label>{adjustmentData.sepia}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={adjustmentData.sepia}
-            onChange={(e) => setSepia(e.target.value)}
-          />
-        </div>
-
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Đảo ngược màu</label>
-            <label>{adjustmentData.invert}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={adjustmentData.invert}
-            onChange={(e) => setInvert(e.target.value)}
-          />
-          </div>
-        <div className="slider-group">
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <label>Mờ</label>
-            <label>{adjustmentData.blur}</label>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={adjustmentData.blur}
-            onChange={(e) => setBlur(e.target.value)}
-          />
-          </div>
+        <SliderRow
+          label="Độ sáng"
+          value={adjustmentData.brightness}
+          min={0} max={200}
+          onChange={set("brightness")}
+        />
+        <SliderRow
+          label="Độ tương phản"
+          value={adjustmentData.contrast}      
+          min={0} max={200}
+          onChange={set("contrast")}          
+        />
+        <SliderRow
+          label="Độ bão hòa màu"
+          value={adjustmentData.saturation}    
+          min={0} max={200}
+          onChange={set("saturation")}        
+        />
+        <SliderRow
+          label="Sắc độ (Hue)"
+          value={adjustmentData.hue}
+          min={-180} max={180}
+          onChange={set("hue")}
+        />
+        <SliderRow
+          label="Thang xám"
+          value={adjustmentData.grey_scale}
+          min={0} max={100}
+          onChange={set("grey_scale")}
+        />
+        <SliderRow
+          label="Cổ điển (Sepia)"
+          value={adjustmentData.sepia}
+          min={0} max={100}
+          onChange={set("sepia")}
+        />
+        <SliderRow
+          label="Đảo ngược màu"
+          value={adjustmentData.invert}
+          min={0} max={100}
+          onChange={set("invert")}
+        />
+        <SliderRow
+          label="Làm mờ (Blur)"
+          value={adjustmentData.blur}
+          min={0} max={20}
+          onChange={set("blur")}
+        />
       </div>
 
       <div className="bottom-content">
         <div className="action-btn">
-          <button id="crop-action-cancel" onClick={resetAdjustmentData}>
+          <button type="button" id="crop-action-cancel" onClick={handleCancel} disabled={applying}>
             Hủy
           </button>
-          <button id="crop-action-apply" onClick={handleAdjustment}>
-            Áp dụng
+          <button type="button" id="crop-action-apply" onClick={handleApply} disabled={!currentImage || applying}>
+            {applying ? "Đang áp dụng…" : "Áp dụng"}
           </button>
         </div>
       </div>

@@ -1,144 +1,297 @@
 # app/routes.py
 
-import base64
-from io import BytesIO
+import json
 import logging
 import os
 import tempfile
 import threading
 import time
-from tkinter import Image
 import uuid
-from flask import Blueprint,request, send_file, jsonify,current_app,send_from_directory, after_this_request
+from datetime import datetime, timezone
+from io import BytesIO
+
+import ffmpeg
 import requests
-from .utils import apply_video_adjustments, change_background, convert_image, download_and_convert_playlist_to_mp3, download_soundcloud, download_youtube_mp4, generate_image_from_text, generate_subtitles, generate_subtitles_premium, resize_image, crop_image, remove_object, process_crop, remove_background, trim_video
 import shutil
-import json  # Import json module
-# Sử dụng Blueprint để tổ chức các route
+from flask import (Blueprint, after_this_request, current_app, jsonify,
+                   request, send_file)
+from werkzeug.utils import secure_filename
+
+from .utils import (apply_video_adjustments, change_background,
+                    convert_image, download_and_convert_playlist_to_mp3,
+                    download_soundcloud, download_youtube_mp4,
+                    generate_image_from_text, generate_subtitles,
+                    generate_subtitles_premium, merge_video_with_subtitles,
+                    process_crop, remove_background, remove_object,
+                    resize_image, trim_video)
+
+# ─── Setup Logging ─────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# ─── Blueprint ─────────────────────────────────────────────────────────────────
 bp = Blueprint('main', __name__)
-@bp.route('/resize', methods=['POST'])
-def resize_route():
-    file = request.files['image']
-    img_io = resize_image(file)
-    return send_file(img_io, mimetype='image/jpeg')
 
-@bp.route('/crop', methods=['POST'])
-def crop_image_route():
-    data = request.get_json()
-    top = int(data['top'])
-    left = int(data['left'])
-    width = int(data['width'])
-    height = int(data['height'])
-    image_data = data['image']
+# ─── Constants ─────────────────────────────────────────────────────────────────
+ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv', 'webm'}
+ALLOWED_SUBTITLE_EXTENSIONS = {'vtt', 'srt'}
+ALLOWED_IMAGE_OUTPUT_FORMATS = {'PNG', 'JPEG', 'JPG', 'WEBP', 'BMP'}
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUTPUT_FOLDER = os.path.join(BASE_DIR, 'assets', 'temp_trimmed_videos')
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-    # Sử dụng hàm tiện ích để xử lý crop hình ảnh
-    cropped_image_str = process_crop(image_data, left, top, width, height)
 
-    # Trả về hình ảnh đã crop dưới dạng base64
-    return jsonify({'cropped_image': 'data:image/png;base64,' + cropped_image_str})
+# ─── Helpers ───────────────────────────────────────────────────────────────────
+def allowed_file(filename: str, allowed_extensions: set) -> bool:
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-@bp.route('/remove-object', methods=['POST'])
-def remove_object_route():
-    """
-    API route để xóa một chi tiết trong ảnh.
-    """
-    file = request.files['image']
-    x1 = int(request.form['x1'])
-    y1 = int(request.form['y1'])
-    x2 = int(request.form['x2'])
-    y2 = int(request.form['y2'])
-    method = request.form.get('method', 'telea')
 
-    # Gọi hàm remove_object từ utils.py
-    result_io = remove_object(file, x1, y1, x2, y2, method)
-
-    # Trả về ảnh đã xử lý
-    return send_file(result_io, mimetype='image/jpeg')
-
-@bp.route('/remove-background', methods=['POST'])
-def remove_background_route():
-    try:
-        data = request.get_json()
-        if 'image' not in data:
-            return jsonify({'error': 'Trường image không tồn tại trong dữ liệu gửi đến'}), 400
-
-        image_data = data['image']
-
-        # Gọi hàm remove_background từ utils.py
-        output_image_str = remove_background(image_data)
-
-        if output_image_str:
-            # Trả về hình ảnh đã xóa nền dưới dạng base64
-            return jsonify({'output_image': 'data:image/png;base64,' + output_image_str})
-        else:
-            return jsonify({'error': 'Lỗi khi xử lý xóa nền.'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
-
-import traceback
-
-@bp.route('/change-background', methods=['POST'])
-def change_background_route():
-    try:
-        data = request.get_json()
-        image_data = data.get('image')
-        background_type = data.get('backgroundType')
-        background_value = data.get('backgroundValue')
-
-        if not image_data or not background_type or not background_value:
-            return jsonify({'error': 'Thiếu dữ liệu cần thiết.'}), 400
-
-        output_image_str = change_background(image_data, background_type, background_value)
-
-        if output_image_str:
-            return jsonify({'output_image': 'data:image/png;base64,' + output_image_str})
-        else:
-            return jsonify({'error': 'Lỗi khi thay đổi nền.'}), 500
-    except Exception as e:
-        print(f"Lỗi khi xử lý yêu cầu thay đổi nền: {e}")
-        traceback.print_exc()
-        # Trả về chi tiết lỗi cho frontend
-        return jsonify({'error': f'Lỗi khi xử lý yêu cầu: {str(e)}'}), 500
-
-@bp.route('/text-to-image', methods=['POST'])
-def text_to_image_route():
-    print("Request received")
-    data = request.get_json()
-    text_prompt = data.get('text', '')
-    
-    if not text_prompt:
-        return jsonify({"error": "Text prompt is required"}), 400
-
-    # Call the utility function to generate the image
-    base64_image = generate_image_from_text(text_prompt)
-    
-    if base64_image:
-        return jsonify({"image": base64_image})
-    else:
-        return jsonify({"error": "Failed to generate image"}), 500
-
-def delete_file_after_delay(file_path, delay):
-    """Deletes the specified file after a delay (in seconds)."""
+def delete_file_after_delay(file_path: str, delay: int) -> None:
+    """Delete the specified file after a delay (seconds)."""
     time.sleep(delay)
     if os.path.exists(file_path):
         try:
             os.remove(file_path)
-            print(f"File {file_path} deleted after {delay} seconds.")
+            logger.info(f"File {file_path} deleted after {delay}s.")
         except Exception as e:
-            print(f"Error deleting file {file_path}: {e}")
+            logger.error(f"Error deleting file {file_path}: {e}")
 
+
+def json_error(message: str, status: int = 400, **extra):
+    payload = {'error': message}
+    if extra:
+        payload.update(extra)
+    return jsonify(payload), status
+
+
+# ─── Image Routes ──────────────────────────────────────────────────────────────
+@bp.route('/resize', methods=['POST'])
+def resize_route():
+    """Resize an uploaded image to 300×300 (default)."""
+    if 'image' not in request.files:
+        return json_error('Missing image file', 400)
+    file = request.files['image']
+    try:
+        width = int(request.form.get('width', 300))
+        height = int(request.form.get('height', 300))
+        if width <= 0 or height <= 0:
+            return json_error('width and height must be greater than 0', 400)
+
+        img_io = resize_image(file, width, height)
+        return send_file(img_io, mimetype='image/jpeg')
+    except ValueError as e:
+        return json_error(f'Invalid resize parameters: {e}', 400)
+    except Exception as e:
+        logger.exception(f"Error resizing image: {e}")
+        return json_error(str(e), 500)
+
+
+@bp.route('/crop', methods=['POST'])
+def crop_image_route():
+    """Crop an image given top/left/width/height and a base64 image string."""
+    data = request.get_json(silent=True) or {}
+    if not data:
+        return json_error('Invalid JSON body', 400)
+    try:
+        top    = int(data['top'])
+        left   = int(data['left'])
+        width  = int(data['width'])
+        height = int(data['height'])
+        image_data = data['image']
+        if width <= 0 or height <= 0:
+            return json_error('width and height must be greater than 0', 400)
+    except (KeyError, ValueError) as e:
+        return json_error(f'Missing or invalid field: {e}', 400)
+
+    try:
+        cropped_image_str = process_crop(image_data, left, top, width, height)
+        return jsonify({'cropped_image': 'data:image/png;base64,' + cropped_image_str})
+    except ValueError as e:
+        return json_error(str(e), 400)
+    except Exception as e:
+        logger.exception(f"Error cropping image: {e}")
+        return json_error('Failed to crop image', 500)
+
+
+@bp.route('/remove-object', methods=['POST'])
+def remove_object_route():
+    """Remove an object from an image using inpainting."""
+    if 'image' not in request.files:
+        return json_error('Missing image file', 400)
+    try:
+        file   = request.files['image']
+        x1     = int(request.form['x1'])
+        y1     = int(request.form['y1'])
+        x2     = int(request.form['x2'])
+        y2     = int(request.form['y2'])
+        method = request.form.get('method', 'telea')
+        result_io = remove_object(file, x1, y1, x2, y2, method)
+        return send_file(result_io, mimetype='image/jpeg')
+    except (KeyError, ValueError) as e:
+        return json_error(f'Missing or invalid field: {e}', 400)
+    except Exception as e:
+        logger.exception(f"Error removing object: {e}")
+        return json_error(str(e), 500)
+
+
+@bp.route('/remove-background', methods=['POST'])
+def remove_background_route():
+    """Remove the background from a base64-encoded image."""
+    data = request.get_json(silent=True) or {}
+    image_data = data.get('image')
+    if not image_data:
+        return json_error('Missing image field in request body', 400)
+    try:
+        output = remove_background(image_data, include_meta=True)
+        if isinstance(output, tuple):
+            output_image_str, meta = output
+        else:
+            output_image_str, meta = output, None
+
+        if output_image_str:
+            payload = {
+                'success': True,
+                'action': 'remove-background',
+                'message': 'Background removed successfully',
+                'output_image': 'data:image/png;base64,' + output_image_str,
+            }
+            if meta:
+                payload['meta'] = meta
+            return jsonify(payload)
+        return json_error('Failed to process background removal.', 500)
+    except RuntimeError as e:
+        logger.exception(f"Background removal dependency error: {e}")
+        return json_error(str(e), 503)
+    except ValueError as e:
+        logger.exception(f"Invalid input for remove-background: {e}")
+        return json_error(str(e), 400)
+    except Exception as e:
+        logger.exception(f"Error removing background: {e}")
+        return json_error(str(e), 500)
+
+
+@bp.route('/change-background', methods=['POST'])
+def change_background_route():
+    """Change the background of an image to a solid color or another image."""
+    data = request.get_json(silent=True) or {}
+    if not data:
+        return json_error('Invalid JSON body', 400)
+
+    image_data       = data.get('image')
+    background_type  = str(data.get('backgroundType', '')).strip().lower()
+    background_value = data.get('backgroundValue')
+
+    if not image_data:
+        return json_error('Missing required field: image', 400)
+    if background_type not in {'transparent', 'color', 'image'}:
+        return json_error('backgroundType must be one of: transparent, color, image', 400)
+    if background_type in {'color', 'image'} and not background_value:
+        return json_error('Missing required field: backgroundValue', 400)
+    if background_type == 'transparent' and not background_value:
+        background_value = 'transparent'
+
+    try:
+        output = change_background(
+            image_data,
+            background_type,
+            background_value,
+            include_meta=True,
+        )
+        if isinstance(output, tuple):
+            output_image_str, meta = output
+        else:
+            output_image_str, meta = output, None
+
+        if output_image_str:
+            payload = {
+                'success': True,
+                'action': 'change-background',
+                'applied_background': background_type,
+                'message': 'Background updated successfully',
+                'output_image': 'data:image/png;base64,' + output_image_str,
+            }
+            if meta:
+                payload['meta'] = meta
+            return jsonify(payload)
+        return json_error('Failed to change background.', 500)
+    except RuntimeError as e:
+        logger.exception(f"Change background dependency error: {e}")
+        return json_error(str(e), 503)
+    except ValueError as e:
+        logger.exception(f"Invalid input for change-background: {e}")
+        return json_error(str(e), 400)
+    except Exception as e:
+        logger.exception(f"Error changing background: {e}")
+        return json_error(str(e), 500)
+
+
+@bp.route('/convert-image', methods=['POST'])
+def convert_image_route():
+    """Convert an uploaded image to a specified format (png, jpeg, webp, bmp…)."""
+    if 'image' not in request.files:
+        return json_error('Missing image file', 400)
+
+    output_format = request.form.get('format', 'PNG').upper()
+    if output_format not in ALLOWED_IMAGE_OUTPUT_FORMATS:
+        return json_error(
+            f'Unsupported format: {output_format}. Allowed: {sorted(ALLOWED_IMAGE_OUTPUT_FORMATS)}',
+            400,
+        )
+    file = request.files['image']
+
+    with tempfile.TemporaryDirectory() as tmp:
+        input_path  = os.path.join(tmp, secure_filename(file.filename))
+        output_path = os.path.join(tmp, f"converted.{output_format.lower()}")
+        file.save(input_path)
+
+        result = convert_image(input_path, output_path, output_format)
+        if result:
+            return send_file(output_path, as_attachment=True,
+                             download_name=f"converted.{output_format.lower()}")
+        return json_error('Image conversion failed', 500)
+
+
+@bp.route('/text-to-image', methods=['POST'])
+def text_to_image_route():
+    """Generate an image from a text prompt using the NVIDIA API."""
+    data = request.get_json(silent=True) or {}
+    if not data:
+        return json_error('Invalid JSON body', 400)
+
+    text_prompt = data.get('text', '').strip()
+    if not text_prompt:
+        return json_error('text field is required and must not be empty', 400)
+
+    try:
+        base64_image = generate_image_from_text(text_prompt)
+        return jsonify({'image': base64_image})
+    except RuntimeError as e:
+        logger.exception(f'text-to-image runtime error: {e}')
+        message = str(e)
+        if 'NVIDIA_API_KEY is not set' in message:
+            return json_error(message, 503)
+        return json_error(message, 502)
+    except ValueError as e:
+        logger.exception(f'text-to-image value error: {e}')
+        return json_error(str(e), 400)
+    except Exception as e:
+        logger.exception(f'text-to-image unexpected error: {e}')
+        return json_error('Failed to generate image', 500)
+
+
+# ─── Download Routes ───────────────────────────────────────────────────────────
 @bp.route('/download', methods=['POST'])
 def download_playlist():
-    data = request.get_json()
-    url = data.get('url')
-    # output_folder = './assets/audios'
-    output_folder = os.path.join(current_app.root_path, 'assets', 'audios')
-
-    
+    """Download a YouTube playlist and return a ZIP of MP3 files."""
+    data = request.get_json(silent=True) or {}
+    url = data.get('url') if data else None
     if not url:
-        return jsonify({'error': 'Thiếu URL playlist'}), 400
+        return json_error('Missing playlist URL', 400)
 
+    output_folder = os.path.join(current_app.root_path, 'assets', 'audios')
     os.makedirs(output_folder, exist_ok=True)
     temp_folder = tempfile.mkdtemp(dir=output_folder)
 
@@ -146,26 +299,35 @@ def download_playlist():
         download_and_convert_playlist_to_mp3(url, temp_folder)
         zip_file_path = shutil.make_archive(temp_folder, 'zip', temp_folder)
         zip_file_name = os.path.basename(zip_file_path)
-        shutil.rmtree(temp_folder)
-
-        # Start a thread to delete the zip file after 1 hour (3600 seconds)
-        threading.Thread(target=delete_file_after_delay, args=(zip_file_path, 3600), daemon=True).start()
-
-        return jsonify({'download_link': f'{zip_file_name}'})
+        shutil.rmtree(temp_folder, ignore_errors=True)
+        threading.Thread(target=delete_file_after_delay,
+                         args=(zip_file_path, 3600), daemon=True).start()
+        return jsonify({'download_link': zip_file_name})
     except Exception as e:
-        print(f"Error occurred: {e}")
+        logger.exception(f"Error downloading playlist: {e}")
+        shutil.rmtree(temp_folder, ignore_errors=True)
         return jsonify({'error': 'Failed to process playlist'}), 500
 
-@bp.route('/dowload-youtube-mp4', methods=['POST'])
+
+@bp.route('/download/<filename>')
+def download_file(filename):
+    """Serve a previously created audio ZIP file."""
+    file_path = os.path.join(current_app.root_path, 'assets', 'audios',
+                             secure_filename(filename))
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True)
+    return jsonify({'error': 'File not found'}), 404
+
+
+@bp.route('/download-youtube-mp4', methods=['POST'])   # fixed typo: 'dowload' → 'download'
 def download_youtube_mp4_route():
-    data = request.get_json()
-    url = data.get('url')
-    # output_folder = './assets/videos'
-    output_folder = os.path.join(current_app.root_path, 'assets', 'videos')
-
+    """Download a YouTube video as MP4 and return a ZIP archive."""
+    data = request.get_json(silent=True) or {}
+    url = data.get('url') if data else None
     if not url:
-        return jsonify({'error': 'Thiếu URL video'}), 400
+        return json_error('Missing video URL', 400)
 
+    output_folder = os.path.join(current_app.root_path, 'assets', 'videos')
     os.makedirs(output_folder, exist_ok=True)
     temp_folder = tempfile.mkdtemp(dir=output_folder)
 
@@ -173,506 +335,359 @@ def download_youtube_mp4_route():
         download_youtube_mp4(url, temp_folder)
         zip_file_path = shutil.make_archive(temp_folder, 'zip', temp_folder)
         zip_file_name = os.path.basename(zip_file_path)
-        shutil.rmtree(temp_folder)
-
-        # Start a thread to delete the zip file after 1 hour (3600 seconds)
-        threading.Thread(target=delete_file_after_delay, args=(zip_file_path, 3600), daemon=True).start()
-
-        return jsonify({'download_link': f'{zip_file_name}'})
+        shutil.rmtree(temp_folder, ignore_errors=True)
+        threading.Thread(target=delete_file_after_delay,
+                         args=(zip_file_path, 3600), daemon=True).start()
+        return jsonify({'download_link': zip_file_name})
     except Exception as e:
-        print(f"Error occurred: {e}")
-        return jsonify({'error': 'Failed to process playlist'}), 500
+        logger.exception(f"Error downloading YouTube video: {e}")
+        shutil.rmtree(temp_folder, ignore_errors=True)
+        return jsonify({'error': 'Failed to process video download'}), 500
+
 
 @bp.route('/download-youtube-mp4/<filename>')
 def download_youtube_mp4_file(filename):
-    # file_path = f'D:\\Projects\\multi_tools\\backend\\assets\\videos\\{filename}'
-    file_path = os.path.join(current_app.root_path, 'assets', 'videos', filename)
+    """Serve a previously created YouTube MP4 ZIP file."""
+    file_path = os.path.join(current_app.root_path, 'assets', 'videos',
+                             secure_filename(filename))
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
-    else:
-        return jsonify({'error': 'File not found'}), 404
+    return jsonify({'error': 'File not found'}), 404
 
-@bp.route('/download/<filename>')
-def download_file(filename):
-    # file_path = f'D:\\Projects\\multi_tools\\backend\\assets\\audios\\{filename}'
-    file_path = os.path.join(current_app.root_path, 'assets', 'audios', filename)
-    if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True)
-    else:
-        return jsonify({'error': 'File not found'}), 404
 
 @bp.route('/download-soundcloud', methods=['POST'])
 def download_soundcloud_mp3_route():
-    data = request.get_json()
-    url = data.get('url')
-    # output_folder = './assets/soundcloud'
-    output_folder = os.path.join(current_app.root_path, 'assets', 'soundcloud')
-
+    """Download SoundCloud track(s) as MP3 and return a ZIP archive."""
+    data = request.get_json(silent=True) or {}
+    url = data.get('url') if data else None
     if not url:
-        return jsonify({'error': 'Thiếu URL media'}), 400
+        return json_error('Missing media URL', 400)
 
+    output_folder = os.path.join(current_app.root_path, 'assets', 'soundcloud')
     os.makedirs(output_folder, exist_ok=True)
 
     try:
-        # Tải xuống SoundCloud media
-        temp_folder = download_soundcloud(url, output_folder)
-        
-        # Tạo một tệp zip từ các tệp đã tải xuống
+        temp_folder   = download_soundcloud(url, output_folder)
         zip_file_path = shutil.make_archive(temp_folder, 'zip', temp_folder)
         zip_file_name = os.path.basename(zip_file_path)
-        shutil.rmtree(temp_folder)  # Xóa thư mục tạm sau khi tạo zip
-
-        # Bắt đầu một luồng để xóa tệp zip sau 1 giờ (3600 giây)
-        threading.Thread(target=delete_file_after_delay, args=(zip_file_path, 3600), daemon=True).start()
-
-        # Trả về đường dẫn tải xuống (có thể cần thêm URL server để tạo đường dẫn đầy đủ)
+        shutil.rmtree(temp_folder, ignore_errors=True)
+        threading.Thread(target=delete_file_after_delay,
+                         args=(zip_file_path, 3600), daemon=True).start()
         return jsonify({'download_link': zip_file_name})
     except Exception as e:
-        print(f"Error occurred: {e}")
+        logger.exception(f"Error downloading SoundCloud media: {e}")
         return jsonify({'error': 'Failed to process the download request'}), 500
+
 
 @bp.route('/download-soundcloud/<filename>')
 def serve_soundcloud_zip(filename):
-    # file_path = f'D:\\Projects\\multi_tools\\backend\\assets\\soundcloud\\{filename}'
-    file_path = os.path.join(current_app.root_path, 'assets', 'soundcloud', filename)
+    """Serve a previously created SoundCloud ZIP file."""
+    file_path = os.path.join(current_app.root_path, 'assets', 'soundcloud',
+                             secure_filename(filename))
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
-    else:
-        return jsonify({'error': 'File not found'}), 404
+    return jsonify({'error': 'File not found'}), 404
+
+
+# ─── Subtitle Routes ───────────────────────────────────────────────────────────
+def _receive_video(temp_dir: str):
+    """
+    Helper: save an uploaded video (file or URL) to temp_dir.
+    Returns the local path or raises ValueError.
+    """
+    if 'video' in request.files:
+        video_file = request.files['video']
+        if not video_file.filename:
+            raise ValueError('No video file selected')
+        if not allowed_file(video_file.filename, ALLOWED_VIDEO_EXTENSIONS):
+            raise ValueError(
+                f'Unsupported video type. Allowed: {sorted(ALLOWED_VIDEO_EXTENSIONS)}'
+            )
+        video_path = os.path.join(temp_dir, secure_filename(video_file.filename))
+        video_file.save(video_path)
+        return video_path
+
+    if 'video_url' in request.form:
+        video_url = request.form['video_url']
+        if not video_url.startswith(('http://', 'https://')):
+            raise ValueError('video_url must start with http:// or https://')
+
+        try:
+            resp = requests.get(video_url, stream=True, timeout=60)
+        except requests.RequestException as exc:
+            raise ValueError(f'Cannot download video from URL: {exc}') from exc
+        if resp.status_code != 200:
+            raise ValueError('Cannot download video from URL')
+
+        max_bytes = int(os.environ.get('REMOTE_VIDEO_MAX_BYTES', str(500 * 1024 * 1024)))
+        total = 0
+        video_path = os.path.join(temp_dir, 'video.mp4')
+        try:
+            with open(video_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError(
+                            f'Remote video exceeds size limit ({max_bytes} bytes).'
+                        )
+                    f.write(chunk)
+        finally:
+            resp.close()
+        return video_path
+
+    raise ValueError('Missing video file or video_url')
+
 
 @bp.route('/generate-subtitles', methods=['POST'])
 def generate_subtitles_route():
-    """
-    API route để tạo phụ đề cho video.
-    """
+    """Generate VTT subtitles for an uploaded video (Google Speech Recognition)."""
     temp_dir = tempfile.mkdtemp()
     try:
-        video_path = None
-        if 'video' in request.files:
-            video_file = request.files['video']
-            if video_file.filename == '':
-                return jsonify({'error': 'Không có tệp video được chọn'}), 400
-            # Lưu tệp video tạm thời
-            video_path = os.path.join(temp_dir, video_file.filename)
-            video_file.save(video_path)
-        elif 'video_url' in request.form:
-            video_url = request.form['video_url']
-            # Tải video từ URL
-            video_response = requests.get(video_url, stream=True)
-            if video_response.status_code != 200:
-                return jsonify({'error': 'Không thể tải video từ URL'}), 400
-            video_path = os.path.join(temp_dir, 'video.mp4')
-            with open(video_path, 'wb') as f:
-                for chunk in video_response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        else:
-            return jsonify({'error': 'Thiếu tệp video hoặc URL'}), 400
-
-        # Gọi hàm generate_subtitles từ utils.py
+        video_path = _receive_video(temp_dir)
         subtitles_path = generate_subtitles(video_path, temp_dir)
 
         if subtitles_path:
-            # Đảm bảo xóa thư mục tạm sau khi phản hồi được gửi
             @after_this_request
-            def remove_temp_dir(response):
-                try:
-                    shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logging.error(f"Lỗi khi xóa thư mục tạm {temp_dir}: {e}")
+            def _cleanup(response):
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 return response
 
-            # Gửi tệp phụ đề cho client 
-            return send_file(
-                subtitles_path,
-                as_attachment=True,
-                download_name='subtitles.vtt',  # Thay 'attachment_filename' bằng 'download_name'
-                mimetype='text/vtt'  # Đảm bảo đặt mimetype đúng cho VTT
-            )
-        else:
-            return jsonify({'error': 'Lỗi khi tạo phụ đề'}), 500
+            return send_file(subtitles_path, as_attachment=True,
+                             download_name='subtitles.vtt', mimetype='text/vtt')
+        return json_error('Failed to generate subtitles', 500)
+
+    except ValueError as e:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return json_error(str(e), 400)
+    except RuntimeError as e:
+        logger.exception(f"Subtitle runtime error: {e}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return json_error(str(e), 503)
     except Exception as e:
-        logging.error(f"Lỗi khi xử lý yêu cầu tạo phụ đề: {e}")
-        return jsonify({'error': 'Lỗi máy chủ'}), 500
-    
+        logger.exception(f"Subtitle generation error: {e}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return json_error('Internal server error', 500)
+
 
 @bp.route('/generate-subtitles-premium', methods=['POST'])
 def generate_subtitles_premium_route():
-    """
-    API route để tạo phụ đề cho video.
-    """
+    """Generate VTT subtitles using the Vosk offline engine (premium)."""
     temp_dir = tempfile.mkdtemp()
     try:
-        video_path = None
-        if 'video' in request.files:
-            video_file = request.files['video']
-            if video_file.filename == '':
-                return jsonify({'error': 'Không có tệp video được chọn'}), 400
-            # Lưu tệp video tạm thời
-            video_path = os.path.join(temp_dir, video_file.filename)
-            video_file.save(video_path)
-        elif 'video_url' in request.form:
-            video_url = request.form['video_url']
-            # Tải video từ URL
-            video_response = requests.get(video_url, stream=True)
-            if video_response.status_code != 200:
-                return jsonify({'error': 'Không thể tải video từ URL'}), 400
-            video_path = os.path.join(temp_dir, 'video.mp4')
-            with open(video_path, 'wb') as f:
-                for chunk in video_response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        else:
-            return jsonify({'error': 'Thiếu tệp video hoặc URL'}), 400
-
+        video_path = _receive_video(temp_dir)
         subtitles_path = generate_subtitles_premium(video_path, temp_dir)
 
         if subtitles_path:
-            # Clean up temporary directory after response
             @after_this_request
-            def remove_temp_dir(response):
-                try:
-                    shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logging.error(f"Lỗi khi xóa thư mục tạm {temp_dir}: {e}")
+            def _cleanup(response):
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 return response
 
-            # Send the subtitles file to the client
-            return send_file(
-                subtitles_path,
-                as_attachment=True,
-                download_name='subtitles.vtt',
-                mimetype='text/vtt'
-            )
-        else:
-            return jsonify({'error': 'Lỗi khi tạo phụ đề'}), 500
+            return send_file(subtitles_path, as_attachment=True,
+                             download_name='subtitles.vtt', mimetype='text/vtt')
+        return json_error('Failed to generate subtitles', 500)
+
+    except ValueError as e:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return json_error(str(e), 400)
+    except RuntimeError as e:
+        logger.exception(f"Premium subtitle runtime error: {e}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return json_error(str(e), 503)
     except Exception as e:
-        logging.error(f"Lỗi khi xử lý yêu cầu tạo phụ đề: {e}")
-        return jsonify({'error': 'Lỗi máy chủ'}), 500
-    
-from flask import Blueprint, request, jsonify, send_file
-import os
-from werkzeug.utils import secure_filename
-from .utils import merge_video_with_subtitles
+        logger.exception(f"Premium subtitle generation error: {e}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return json_error('Internal server error', 500)
 
 
-# Sử dụng thư mục hiện tại chứa file script
-BASE_DIR = os.getcwd()
-
-ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'avi', 'mov'}
-ALLOWED_SUBTITLE_EXTENSIONS = {'vtt', 'srt'}
-
-def allowed_file(filename, allowed_extensions):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
-
+# ─── Video Routes ──────────────────────────────────────────────────────────────
 @bp.route('/merge-video', methods=['POST'])
 def merge_video():
-    logging.info("Received a request to /merge-video")
-    logging.debug(f"request.files: {request.files}")
-    logging.debug(f"request.form: {request.form}")
-
+    """Burn subtitles into a video file using FFmpeg."""
     if 'video' not in request.files or 'subtitles' not in request.files:
-        logging.error("Missing video or subtitles in request.files")
-        return jsonify({"error": "Missing video or subtitles file"}), 400
+        return json_error('Missing video or subtitles file', 400)
 
-    video = request.files['video']
+    video     = request.files['video']
     subtitles = request.files['subtitles']
 
-    # Kiểm tra xem file có hợp lệ không
-    if video.filename == '' or subtitles.filename == '':
-        logging.error("Empty filename for video or subtitles")
-        return jsonify({"error": "Empty filename for video or subtitles"}), 400
+    if not video.filename or not subtitles.filename:
+        return json_error('Empty filename for video or subtitles', 400)
 
-    # Kiểm tra định dạng file
     if not allowed_file(video.filename, ALLOWED_VIDEO_EXTENSIONS):
-        logging.error("Unsupported video file type")
-        return jsonify({"error": "Unsupported video file type"}), 400
+        return json_error(
+            f'Unsupported video type. Allowed: {sorted(ALLOWED_VIDEO_EXTENSIONS)}',
+            400,
+        )
 
     if not allowed_file(subtitles.filename, ALLOWED_SUBTITLE_EXTENSIONS):
-        logging.error("Unsupported subtitles file type")
-        return jsonify({"error": "Unsupported subtitles file type"}), 400
+        return json_error(
+            f'Unsupported subtitle type. Allowed: {sorted(ALLOWED_SUBTITLE_EXTENSIONS)}',
+            400,
+        )
 
-    logging.info(f"Received video: {video.filename}")
-    logging.info(f"Received subtitles: {subtitles.filename}")
-
-    # An toàn hơn khi lưu tên file
-    video_filename = secure_filename(video.filename)
+    video_filename     = secure_filename(video.filename)
     subtitles_filename = secure_filename(subtitles.filename)
+    output_filename    = f"output_{video_filename}"
 
-    # Sử dụng thư mục hiện tại chứa script
-    video_path = os.path.join(BASE_DIR, video_filename)
-    # subtitles_path là thư mục chứa thư mục BASE_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        video_path     = os.path.join(tmp, video_filename)
+        subtitles_path = os.path.join(tmp, subtitles_filename)
+        output_path    = os.path.join(tmp, output_filename)
 
+        video.save(video_path)
+        subtitles.save(subtitles_path)
 
-    subtitles_path = os.path.join(BASE_DIR, subtitles_filename)
-    output_filename = f"output_{video_filename}"
-    output_path = os.path.join(BASE_DIR, output_filename)
+        success, message = merge_video_with_subtitles(video_path, subtitles_path, output_path)
 
-    # Lưu file lên server
-    video.save(video_path)
-    subtitles.save(subtitles_path)
-    logging.info(f"Saved video to {video_path}")
-    logging.info(f"Saved subtitles to {subtitles_path}")
+        if not success:
+            logger.error(f"Merge failed: {message}")
+            return json_error('Merge failed', 500, details=message)
 
-    # Gọi hàm hợp nhất video và phụ đề
-    success, message = merge_video_with_subtitles(video_path, subtitles_filename, output_path)
-
-    if success:
         if not os.path.exists(output_path):
-            logging.error(f"Merged video file does not exist at {output_path}")
-            return jsonify({"error": "Merged video file not found"}), 500
-        logging.info(f"Merge successful: {output_path}")
-        
-        # Sử dụng after_this_request để xóa tệp sau khi gửi
-        @after_this_request
-        def cleanup(response):
-            try:
-                os.remove(video_path)
-                os.remove(subtitles_path)
-                os.remove(output_path)
-                logging.info("Deleted video, subtitles, and output files after sending.")
-            except Exception as cleanup_error:
-                logging.error(f"Error cleaning up files: {cleanup_error}")
-            return response
+            return json_error('Merged video file not found after processing', 500)
 
-        try:
-            return send_file(
-                output_path,
-                mimetype='video/mp4',
-                as_attachment=True,
-                download_name=output_filename  # Sử dụng download_name thay vì attachment_filename
-            )
-        except Exception as e:
-            logging.exception(f"Error sending file: {e}")
-            return jsonify({"error": "Failed to send merged video file", "details": str(e)}), 500
+        # Read into memory so temp dir can be deleted
+        with open(output_path, 'rb') as f:
+            video_data = f.read()
 
-import ffmpeg
-import logging
+    return send_file(
+        BytesIO(video_data),
+        mimetype='video/mp4',
+        as_attachment=True,
+        download_name=output_filename
+    )
 
-# Setup Logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)      
 
 @bp.route('/apply-adjustment', methods=['POST'])
 def apply_adjustment_route():
-    """
-    API route to apply adjustments to a video.
-
-    Expects:
-    - 'video' in request.files: The video file to be adjusted.
-    - 'adjustmentData' in request.form: JSON string containing adjustment parameters.
-
-    Returns:
-    - Adjusted video file as a downloadable attachment.
-    """
-    logger.info("Received request to /apply-adjustment")
-
-    # Validate presence of 'video' and 'adjustmentData'
+    """Apply brightness/contrast/saturation/hue/blur etc. to a video."""
     if 'video' not in request.files or 'adjustmentData' not in request.form:
-        logger.error("Missing 'video' or 'adjustmentData' in the request")
-        return jsonify({'error': 'Thiếu video hoặc dữ liệu điều chỉnh'}), 400
+        return json_error('Missing video file or adjustmentData', 400)
 
-    video_file = request.files['video']
+    video_file          = request.files['video']
     adjustment_data_str = request.form['adjustmentData']
 
-    # Validate filename
-    if video_file.filename == '':
-        logger.error("No selected video file")
-        return jsonify({'error': 'No selected video file'}), 400
+    if not video_file.filename:
+        return json_error('No selected video file', 400)
+    if not allowed_file(video_file.filename, ALLOWED_VIDEO_EXTENSIONS):
+        return json_error(
+            f'Unsupported video type. Allowed: {sorted(ALLOWED_VIDEO_EXTENSIONS)}',
+            400,
+        )
 
-    # Parse adjustment data
     try:
         adjustment_data = json.loads(adjustment_data_str)
-        logger.debug(f"Adjustment data received: {adjustment_data}")
     except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON for 'adjustmentData': {str(e)}")
-        return jsonify({'error': 'Invalid JSON for adjustmentData'}), 400
+        return json_error(f'Invalid JSON for adjustmentData: {e}', 400)
 
-    # Define absolute output folder
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Adjust based on project structure
-    output_folder = os.path.join(BASE_DIR, 'assets', 'adjusted_videos')
-    os.makedirs(output_folder, exist_ok=True)
-    logger.debug(f"Output folder set to: {output_folder}")
+    if not isinstance(adjustment_data, dict):
+        return json_error('adjustmentData must be a JSON object', 400)
 
-    # Generate unique filenames
-    file_id = str(uuid.uuid4())
-    # Extract file extension from original filename
-    _, ext = os.path.splitext(secure_filename(video_file.filename))
-    input_filename = f"{file_id}_input{ext}"
-    output_filename = f"{file_id}_adjusted.mp4"
-    input_path = os.path.join(output_folder, input_filename)
-    output_path = os.path.join(output_folder, output_filename)
+    adjusted_folder = os.path.join(BASE_DIR, 'assets', 'adjusted_videos')
+    os.makedirs(adjusted_folder, exist_ok=True)
 
-    logger.debug(f"Input Path: {input_path}")
-    logger.debug(f"Output Path: {output_path}")
+    file_id        = str(uuid.uuid4())
+    _, ext         = os.path.splitext(secure_filename(video_file.filename))
+    input_path     = os.path.join(adjusted_folder, f"{file_id}_input{ext}")
+    output_path    = os.path.join(adjusted_folder, f"{file_id}_adjusted.mp4")
 
     try:
-        # Save the uploaded video to the temporary input path
         video_file.save(input_path)
-        logger.info(f"Saved original video to {input_path}")
-
-        # Apply video adjustments
         apply_video_adjustments(input_path, adjustment_data, output_path)
-        logger.info(f"Applied adjustments and saved adjusted video to {output_path}")
 
-        # Define the cleanup function before sending the file
         @after_this_request
-        def cleanup(response):
-            try:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-                    logger.info(f"Deleted adjusted video at {output_path}")
-                else:
-                    logger.warning(f"Adjusted video file not found for deletion: {output_path}")
-            except Exception as e:
-                logger.error(f"Failed to delete adjusted video: {str(e)}")
+        def _cleanup(response):
+            for p in (input_path, output_path):
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                except Exception as ex:
+                    logger.error(f"Cleanup error {p}: {ex}")
             return response
 
-        # Send the adjusted video back to the client
-        logger.info(f"Sending adjusted video {output_path} to client")
-        return send_file(
-            output_path,
-            mimetype='video/mp4',
-            as_attachment=True,
-            download_name=f"adjusted_{video_file.filename}"
-        )
+        return send_file(output_path, mimetype='video/mp4', as_attachment=True,
+                         download_name=f"adjusted_{video_file.filename}")
 
     except Exception as e:
-        logger.exception(f"Error applying adjustments: {str(e)}")
-        return jsonify({'error': 'Failed to apply adjustments', 'details': str(e)}), 500
-
-    finally:
-        # Clean up the temporary input file
-        try:
-            if os.path.exists(input_path):
-                os.remove(input_path)
-                logger.info(f"Deleted temp input file: {input_path}")
-            else:
-                logger.warning(f"Temp input file not found for deletion: {input_path}")
-        except Exception as e:
-            logger.error(f"Failed to delete temp input file: {str(e)}")
+        logger.exception(f"Error applying adjustments: {e}")
+        for p in (input_path, output_path):
+            if os.path.exists(p):
+                os.remove(p)
+        return json_error('Failed to apply adjustments', 500, details=str(e))
 
 
-
-
-
-# Determine the absolute path to the 'assets/temp_trimmed_videos' directory
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Goes up two levels from 'routes.py'
-OUTPUT_FOLDER = os.path.join(BASE_DIR, 'assets', 'temp_trimmed_videos')
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-
+@bp.route('/trim-video', methods=['POST'])
 @bp.route('/trim-video/', methods=['POST'])
 def trim_video_route():
-    """
-    Endpoint to trim video.
-
-    Requirements:
-    - video: Original video file (multipart/form-data)
-    - trim_start: Start time in seconds (form-data)
-    - trim_end: End time in seconds (form-data)
-
-    Returns:
-    - Trimmed video file
-    """
-    logger.info("Received request to /trim-video/")
-
-    # Validate presence of 'video' in files
+    """Trim a video between start_time and end_time (seconds)."""
     if 'video' not in request.files:
-        logger.error("No video part in the request")
-        return jsonify({"error": "No video part in the request"}), 400
+        return json_error('No video part in the request', 400)
 
     video_file = request.files['video']
+    if not video_file.filename:
+        return json_error('No selected file', 400)
+    if not allowed_file(video_file.filename, ALLOWED_VIDEO_EXTENSIONS):
+        return json_error(
+            f'Unsupported video type. Allowed: {sorted(ALLOWED_VIDEO_EXTENSIONS)}',
+            400,
+        )
 
-    # Validate filename
-    if video_file.filename == '':
-        logger.error("No selected file")
-        return jsonify({"error": "No selected file"}), 400
-
-    # Parse trim_start and trim_end
     try:
         trim_start = float(request.form.get('trim_start', 0))
-        trim_end = float(request.form.get('trim_end', 0))
-        logger.debug(f"Trim parameters - Start: {trim_start}, End: {trim_end}")
+        trim_end   = float(request.form.get('trim_end', 0))
     except ValueError:
-        logger.error("Invalid trim_start or trim_end value")
-        return jsonify({"error": "Invalid trim_start or trim_end value"}), 400
+        return json_error('trim_start and trim_end must be numbers', 400)
 
-    # Validate trim times
     if trim_start < 0 or trim_end <= trim_start:
-        logger.error("Invalid trim_start and trim_end values")
-        return jsonify({"error": "Invalid trim_start and trim_end values"}), 400
+        return json_error('trim_end must be greater than trim_start (≥ 0)', 400)
 
-    # Check if the uploaded file is a video
-    if not video_file.content_type.startswith("video/"):
-        logger.error("Uploaded file is not a video")
-        return jsonify({"error": "Uploaded file is not a video"}), 400
+    file_id        = str(uuid.uuid4())
+    ext            = os.path.splitext(secure_filename(video_file.filename))[1]
+    input_filename = f"{file_id}_input{ext}"
+    output_filename = f"{file_id}_trimmed.mp4"
+    input_path     = os.path.join(OUTPUT_FOLDER, input_filename)
+    output_path    = os.path.join(OUTPUT_FOLDER, output_filename)
 
-    # Generate unique filenames
-    file_id = str(uuid.uuid4())
-    input_filename = secure_filename(f"{file_id}_input{os.path.splitext(video_file.filename)[1]}")
-    output_filename = secure_filename(f"{file_id}_trimmed.mp4")
-    input_path = os.path.join(OUTPUT_FOLDER, input_filename)
-    output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-
-    logger.debug(f"Input Path: {input_path}")
-    logger.debug(f"Output Path: {output_path}")
-
-    # Save the original video to the temporary directory
     try:
         video_file.save(input_path)
-        logger.info(f"Saved original video to {input_path}")
-    except Exception as e:
-        logger.exception(f"Failed to save uploaded video: {str(e)}")
-        return jsonify({"error": f"Failed to save uploaded video: {str(e)}"}), 500
-
-    # Perform the trimming operation
-    try:
         trim_video(input_path, output_path, trim_start, trim_end)
-        logger.info(f"Trimmed video saved to {output_path}")
     except ffmpeg.Error as e:
-        error_message = e.stderr.decode()
-        logger.error(f"FFmpeg trimming failed: {error_message}")
-        # Cleanup input file
-        try:
+        stderr = e.stderr.decode() if e.stderr else str(e)
+        logger.error(f"FFmpeg trim error: {stderr}")
+        if os.path.exists(input_path):
             os.remove(input_path)
-            logger.debug(f"Removed original video at {input_path}")
-        except Exception as cleanup_error:
-            logger.error(f"Failed to delete original video: {cleanup_error}")
-        return jsonify({"error": f"FFmpeg trimming failed: {error_message}"}), 500
+        return json_error('FFmpeg trim error', 500, details=stderr)
     except Exception as e:
-        logger.exception(f"Unexpected error during trimming: {str(e)}")
-        # Cleanup input file
-        try:
+        logger.exception(f"Unexpected trim error: {e}")
+        if os.path.exists(input_path):
             os.remove(input_path)
-            logger.debug(f"Removed original video at {input_path}")
-        except Exception as cleanup_error:
-            logger.error(f"Failed to delete original video: {cleanup_error}")
-        return jsonify({"error": "Error trimming video"}), 500
+        return json_error('Error trimming video', 500)
+    finally:
+        if os.path.exists(input_path):
+            try: os.remove(input_path)
+            except Exception: pass
 
-    # Remove the original video after trimming
-    try:
-        os.remove(input_path)
-        logger.info(f"Removed original video at {input_path}")
-    except Exception as e:
-        logger.error(f"Failed to delete original video: {str(e)}")
-
-    # Define the cleanup function before sending the file
     @after_this_request
-    def cleanup(response):
+    def _cleanup(response):
         try:
-            os.remove(output_path)
-            logger.info(f"Removed trimmed video at {output_path}")
+            if os.path.exists(output_path):
+                os.remove(output_path)
         except Exception as e:
-            logger.error(f"Failed to delete trimmed video: {str(e)}")
+            logger.error(f"Failed to delete trimmed video: {e}")
         return response
 
-    # Send the trimmed video back to the client
-    try:
-        logger.info(f"Sending trimmed video {output_path} to client")
-        return send_file(
-            output_path,
-            mimetype='video/mp4',
-            as_attachment=True,
-            download_name=f"trimmed_{video_file.filename}"  # Use 'download_name' for Flask >=2.0
-        )
-    except Exception as e:
-        logger.exception(f"Failed to send trimmed video: {str(e)}")
-        return jsonify({"error": "Failed to send trimmed video", "details": str(e)}), 500
+    return send_file(output_path, mimetype='video/mp4', as_attachment=True,
+                     download_name=f"trimmed_{video_file.filename}")
+
+
+# ─── Health Check ──────────────────────────────────────────────────────────────
+@bp.route('/health', methods=['GET'])
+def health_check():
+    """Simple health-check endpoint."""
+    return jsonify({
+        'status': 'ok',
+        'timestamp_utc': datetime.now(timezone.utc).isoformat(),
+        'service': 'multitools-backend',
+    }), 200

@@ -10,6 +10,7 @@ pillow==10.4.0
 Werkzeug==3.0.4
 opencv-python
 rembg
+onnxruntime
 fastapi
 uvicorn
 yt-dlp

@@ -1,122 +1,140 @@
 // VideoProgressBar.jsx
 
-import React, { useRef, useEffect, useState, useContext } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { VideoContext } from "@/context/VideoContext";
 import styles from "../css/VideoProgressBar.module.css";
 
+const clamp = (n, min, max) => Math.max(min, Math.min(n, max));
+
+const formatTime = (seconds) => {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+
+  if (h > 0) {
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  }
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+};
+
+const MIN_TRIM_GAP = 1;
+
 const VideoProgressBar = ({ thumbnails = [] }) => {
-  const { videoRef, trimVideo } = useContext(VideoContext);
-  const [progress, setProgress] = useState(0); // Current progress percentage
-  const [currentTimeDisplay, setCurrentTimeDisplay] = useState("00:00");
-  const [durationDisplay, setDurationDisplay] = useState("00:00");
+  const { videoRef, trimVideo, isProcessing } = useContext(VideoContext);
+
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [trimStart, setTrimStart] = useState(0); // Trim start time in seconds
-  const [trimEnd, setTrimEnd] = useState(0); // Trim end time in seconds
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
   const [hoverTime, setHoverTime] = useState(null);
   const [hoverThumbnail, setHoverThumbnail] = useState(null);
 
   const progressBarRef = useRef(null);
-  const thumbRef = useRef(null);
-  const trimStartRef = useRef(null);
-  const trimEndRef = useRef(null);
 
   useEffect(() => {
     const video = videoRef.current;
-
     if (!video) return;
 
-    const handleTimeUpdate = () => {
-      if (video.duration && !isDragging) {
-        let currentTime = video.currentTime;
-        // Clamp currentTime within trimStart and trimEnd
-        if (currentTime < trimStart) {
-          video.currentTime = trimStart;
-          return;
-        }
-        if (currentTime > trimEnd) {
+    const onLoadedMetadata = () => {
+      const d = Number.isFinite(video.duration) ? video.duration : 0;
+      setDuration(d);
+      setCurrentTime(video.currentTime || 0);
+      setTrimStart(0);
+      setTrimEnd(d);
+    };
+
+    const onTimeUpdate = () => {
+      const t = video.currentTime || 0;
+      if (!isDragging) {
+        if (trimEnd > trimStart && t > trimEnd) {
+          video.currentTime = trimEnd;
           video.pause();
           setIsPlaying(false);
-          video.currentTime = trimEnd;
+          setCurrentTime(trimEnd);
           return;
         }
-
-        const percentage = ((currentTime - trimStart) / (trimEnd - trimStart)) * 100;
-        setProgress(percentage);
-        setCurrentTimeDisplay(formatTime(currentTime));
+        if (t < trimStart) {
+          video.currentTime = trimStart;
+          setCurrentTime(trimStart);
+          return;
+        }
+        setCurrentTime(t);
       }
     };
 
-    const handleLoadedMetadata = () => {
-      setDurationDisplay(formatTime(video.duration));
-      setTrimEnd(video.duration);
-      setProgress(0);
-      setCurrentTimeDisplay(formatTime(video.currentTime));
-    };
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => setIsPlaying(false);
 
-    const handlePlay = () => {
-      setIsPlaying(true);
-    };
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("play", onPlay);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("ended", onEnded);
 
-    const handlePause = () => {
-      setIsPlaying(false);
-    };
-
-    const handleEnded = () => {
-      setIsPlaying(false);
-      setProgress(100);
-      setCurrentTimeDisplay(formatTime(video.duration));
-      video.currentTime = Math.max(video.duration - 0.1, 0);
-    };
-
-    const handleSeeked = () => {
-      handleTimeUpdate();
-      if (!video.paused && !video.ended) {
-        setIsPlaying(true);
-      }
-    };
-
-    const handleTimeUpdateBound = handleTimeUpdate.bind(this);
-
-    video.addEventListener("timeupdate", handleTimeUpdateBound);
-    video.addEventListener("loadedmetadata", handleLoadedMetadata);
-    video.addEventListener("play", handlePlay);
-    video.addEventListener("pause", handlePause);
-    video.addEventListener("ended", handleEnded);
-    video.addEventListener("seeked", handleSeeked);
+    if (video.readyState >= 1) {
+      onLoadedMetadata();
+    }
 
     return () => {
-      video.removeEventListener("timeupdate", handleTimeUpdateBound);
-      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      video.removeEventListener("play", handlePlay);
-      video.removeEventListener("pause", handlePause);
-      video.removeEventListener("ended", handleEnded);
-      video.removeEventListener("seeked", handleSeeked);
+      video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("pause", onPause);
+      video.removeEventListener("ended", onEnded);
     };
   }, [videoRef, isDragging, trimStart, trimEnd]);
 
-  const handleProgressBarClick = (e) => {
+  const progressPercent = useMemo(() => {
+    if (!duration || !Number.isFinite(duration)) return 0;
+    return clamp((currentTime / duration) * 100, 0, 100);
+  }, [currentTime, duration]);
+
+  const trimStartPercent = useMemo(() => {
+    if (!duration || !Number.isFinite(duration)) return 0;
+    return clamp((trimStart / duration) * 100, 0, 100);
+  }, [trimStart, duration]);
+
+  const trimEndPercent = useMemo(() => {
+    if (!duration || !Number.isFinite(duration)) return 100;
+    return clamp((trimEnd / duration) * 100, 0, 100);
+  }, [trimEnd, duration]);
+
+  const seekByClientX = (clientX, shouldClampToTrim = true) => {
     const video = videoRef.current;
-    const rect = progressBarRef.current.getBoundingClientRect();
-    const clickPosition = e.clientX - rect.left;
-    const clickPercentage = clickPosition / rect.width;
-    const newTime = trimStart + clickPercentage * (trimEnd - trimStart);
+    const bar = progressBarRef.current;
+    if (!video || !bar || !duration) return;
 
-    console.log("Progress bar clicked. New time:", newTime);
+    const rect = bar.getBoundingClientRect();
+    const raw = clamp((clientX - rect.left) / rect.width, 0, 1);
+    let targetTime = raw * duration;
 
-    if (isFinite(newTime) && newTime >= trimStart && newTime <= trimEnd) {
-      video.currentTime = newTime;
-    } else {
-      console.error('Invalid newTime:', newTime);
+    if (shouldClampToTrim && trimEnd > trimStart) {
+      targetTime = clamp(targetTime, trimStart, trimEnd);
     }
+
+    video.currentTime = targetTime;
+    setCurrentTime(targetTime);
+  };
+
+  const handleProgressBarClick = (event) => {
+    if (isProcessing) return;
+    seekByClientX(event.clientX, false);
   };
 
   const handlePlayPause = () => {
     const video = videoRef.current;
+    if (!video || isProcessing) return;
+
     if (video.paused || video.ended) {
-      // If starting playback, ensure it starts from trimStart
       if (video.currentTime < trimStart || video.currentTime > trimEnd) {
         video.currentTime = trimStart;
+        setCurrentTime(trimStart);
       }
       video.play();
     } else {
@@ -124,209 +142,98 @@ const VideoProgressBar = ({ thumbnails = [] }) => {
     }
   };
 
-  const formatTime = (seconds) => {
-    if (isNaN(seconds)) return "00:00";
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    const minsString = mins < 10 ? `0${mins}` : `${mins}`;
-    const secsString = secs < 10 ? `0${secs}` : `${secs}`;
-    return `${minsString}:${secsString}`;
-  };
-
-  // Handle drag for playhead thumb
-  const handleDragStart = (e) => {
-    e.preventDefault();
-    setIsDragging(true);
-    document.addEventListener('mousemove', handleDragging);
-    document.addEventListener('mouseup', handleDragEnd);
-    document.addEventListener('touchmove', handleDragging);
-    document.addEventListener('touchend', handleDragEnd);
-  };
-
-  const handleDragging = (e) => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    let clientX;
-
-    if (e.type.startsWith('touch')) {
-      clientX = e.touches[0].clientX;
-    } else {
-      clientX = e.clientX;
-    }
-
-    const rect = progressBarRef.current.getBoundingClientRect();
-    let dragPosition = clientX - rect.left;
-
-    // Clamp dragPosition within the progress bar
-    dragPosition = Math.max(0, Math.min(dragPosition, rect.width));
-
-    const dragPercentage = dragPosition / rect.width;
-    const newTime = trimStart + dragPercentage * (trimEnd - trimStart);
-
-    if (isFinite(newTime) && newTime >= trimStart && newTime <= trimEnd) {
-      setProgress(dragPercentage * 100);
-      setCurrentTimeDisplay(formatTime(newTime));
-      video.currentTime = newTime;
-    }
-  };
-
-  const handleDragEnd = () => {
-    setIsDragging(false);
-    document.removeEventListener('mousemove', handleDragging);
-    document.removeEventListener('mouseup', handleDragEnd);
-    document.removeEventListener('touchmove', handleDragging);
-    document.removeEventListener('touchend', handleDragEnd);
-  };
-
-  // Rewind 15 seconds
   const handleRewind15 = () => {
     const video = videoRef.current;
-    if (video) {
-      video.currentTime = Math.max(video.currentTime - 15, trimStart);
-    }
+    if (!video || isProcessing) return;
+    const t = clamp(video.currentTime - 15, 0, duration || 0);
+    video.currentTime = t;
+    setCurrentTime(t);
   };
 
-  // Forward 15 seconds
   const handleForward15 = () => {
     const video = videoRef.current;
-    if (video) {
-      video.currentTime = Math.min(video.currentTime + 15, trimEnd);
-    }
+    if (!video || isProcessing) return;
+    const t = clamp(video.currentTime + 15, 0, duration || 0);
+    video.currentTime = t;
+    setCurrentTime(t);
   };
 
-  // Trimming Handlers
-  // Trim Start
-  const handleTrimStartDragStart = (e) => {
-    e.preventDefault();
+  const setupDrag = (onMove) => {
     setIsDragging(true);
-    document.addEventListener('mousemove', handleTrimStartDragging);
-    document.addEventListener('mouseup', handleTrimStartDragEnd);
-    document.addEventListener('touchmove', handleTrimStartDragging);
-    document.addEventListener('touchend', handleTrimStartDragEnd);
+
+    const onMouseMove = (e) => onMove(e.clientX);
+    const onTouchMove = (e) => onMove(e.touches[0].clientX);
+
+    const onEnd = () => {
+      setIsDragging(false);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("mouseup", onEnd);
+      document.removeEventListener("touchend", onEnd);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("touchmove", onTouchMove, { passive: true });
+    document.addEventListener("mouseup", onEnd);
+    document.addEventListener("touchend", onEnd);
   };
 
-  const handleTrimStartDragging = (e) => {
-    const video = videoRef.current;
-    if (!video) return;
+  const handlePlayheadDragStart = (event) => {
+    if (isProcessing) return;
+    event.preventDefault();
+    setupDrag((clientX) => seekByClientX(clientX, false));
+  };
 
-    let clientX;
+  const handleTrimStartDragStart = (event) => {
+    if (isProcessing) return;
+    event.preventDefault();
 
-    if (e.type.startsWith('touch')) {
-      clientX = e.touches[0].clientX;
-    } else {
-      clientX = e.clientX;
-    }
+    setupDrag((clientX) => {
+      const bar = progressBarRef.current;
+      if (!bar || !duration) return;
+      const rect = bar.getBoundingClientRect();
+      const raw = clamp((clientX - rect.left) / rect.width, 0, 1);
+      const next = raw * duration;
+      const capped = clamp(next, 0, Math.max(0, trimEnd - MIN_TRIM_GAP));
+      setTrimStart(capped);
 
-    const rect = progressBarRef.current.getBoundingClientRect();
-    let dragPosition = clientX - rect.left;
-
-    // Clamp dragPosition within the progress bar
-    dragPosition = Math.max(0, Math.min(dragPosition, rect.width));
-
-    const dragPercentage = dragPosition / rect.width;
-    const newTrimStart = dragPercentage * video.duration;
-
-    // Ensure trimStart is less than trimEnd
-    if (newTrimStart < trimEnd - 1) { // Minimum 1 second gap
-      setTrimStart(newTrimStart);
-      // If currentTime is before new trimStart, move it to trimStart
-      if (video.currentTime < newTrimStart) {
-        video.currentTime = newTrimStart;
+      if (currentTime < capped && videoRef.current) {
+        videoRef.current.currentTime = capped;
+        setCurrentTime(capped);
       }
-    }
+    });
   };
 
-  const handleTrimStartDragEnd = () => {
-    setIsDragging(false);
-    document.removeEventListener('mousemove', handleTrimStartDragging);
-    document.removeEventListener('mouseup', handleTrimStartDragEnd);
-    document.removeEventListener('touchmove', handleTrimStartDragging);
-    document.removeEventListener('touchend', handleTrimStartDragEnd);
-  };
+  const handleTrimEndDragStart = (event) => {
+    if (isProcessing) return;
+    event.preventDefault();
 
-  // Trim End
-  const handleTrimEndDragStart = (e) => {
-    e.preventDefault();
-    setIsDragging(true);
-    document.addEventListener('mousemove', handleTrimEndDragging);
-    document.addEventListener('mouseup', handleTrimEndDragEnd);
-    document.addEventListener('touchmove', handleTrimEndDragging);
-    document.addEventListener('touchend', handleTrimEndDragEnd);
-  };
+    setupDrag((clientX) => {
+      const bar = progressBarRef.current;
+      if (!bar || !duration) return;
+      const rect = bar.getBoundingClientRect();
+      const raw = clamp((clientX - rect.left) / rect.width, 0, 1);
+      const next = raw * duration;
+      const capped = clamp(next, Math.min(duration, trimStart + MIN_TRIM_GAP), duration);
+      setTrimEnd(capped);
 
-  const handleTrimEndDragging = (e) => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    let clientX;
-
-    if (e.type.startsWith('touch')) {
-      clientX = e.touches[0].clientX;
-    } else {
-      clientX = e.clientX;
-    }
-
-    const rect = progressBarRef.current.getBoundingClientRect();
-    let dragPosition = clientX - rect.left;
-
-    // Clamp dragPosition within the progress bar
-    dragPosition = Math.max(0, Math.min(dragPosition, rect.width));
-
-    const dragPercentage = dragPosition / rect.width;
-    const newTrimEnd = dragPercentage * video.duration;
-
-    // Ensure trimEnd is greater than trimStart
-    if (newTrimEnd > trimStart + 1) { // Minimum 1 second gap
-      setTrimEnd(newTrimEnd);
-      // If currentTime is after new trimEnd, move it to trimEnd
-      if (video.currentTime > newTrimEnd) {
-        video.currentTime = newTrimEnd;
+      if (currentTime > capped && videoRef.current) {
+        videoRef.current.currentTime = capped;
+        setCurrentTime(capped);
       }
-    }
+    });
   };
 
-  const handleTrimEndDragEnd = () => {
-    setIsDragging(false);
-    document.removeEventListener('mousemove', handleTrimEndDragging);
-    document.removeEventListener('mouseup', handleTrimEndDragEnd);
-    document.removeEventListener('touchmove', handleTrimEndDragging);
-    document.removeEventListener('touchend', handleTrimEndDragEnd);
-  };
-
-  // Calculate trim positions as percentages
-  const getTrimStartPosition = () => {
-    const video = videoRef.current;
-    if (!video || !isFinite(video.duration)) return 0;
-    return (trimStart / video.duration) * 100;
-  };
-
-  const getTrimEndPosition = () => {
-    const video = videoRef.current;
-    if (!video || !isFinite(video.duration)) return 100;
-    return (trimEnd / video.duration) * 100;
-  };
-
-  // Thumbnail Hover Handlers
-  const handleMouseMove = (e) => {
-    const video = videoRef.current;
-    if (!thumbnails || thumbnails.length === 0 || !isFinite(video.duration)) return;
+  const handleMouseMove = (event) => {
+    if (!duration || !progressBarRef.current || thumbnails.length === 0 || isDragging) return;
 
     const rect = progressBarRef.current.getBoundingClientRect();
-    const hoverPosition = e.clientX - rect.left;
-    const hoverPercentage = hoverPosition / rect.width;
-    const hoverTimeCalculated = hoverPercentage * video.duration;
-    setHoverTime(hoverTimeCalculated);
+    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    const t = ratio * duration;
+    setHoverTime(t);
 
-    // Determine the thumbnail index based on hover percentage
-    const thumbnailIndex = Math.min(
-      Math.floor(hoverPercentage * thumbnails.length),
-      thumbnails.length - 1
-    );
-    const newHoverThumbnail = thumbnails[thumbnailIndex]?.src || null;
-    setHoverThumbnail(newHoverThumbnail);
-
-    console.log(`Mouse moved to ${hoverTimeCalculated}s, thumbnail:`, newHoverThumbnail);
+    const idx = clamp(Math.round(ratio * (thumbnails.length - 1)), 0, thumbnails.length - 1);
+    setHoverThumbnail(thumbnails[idx]?.src || null);
   };
 
   const handleMouseLeave = () => {
@@ -336,60 +243,50 @@ const VideoProgressBar = ({ thumbnails = [] }) => {
     }
   };
 
-  const handleTrim = () => {
-    if (trimEnd - trimStart < 1) {
-      alert("Khoảng trim phải ít nhất 1 giây.");
-      return;
+  const handleTrimApply = async () => {
+    if (isProcessing) return;
+    if (!duration || trimEnd - trimStart < MIN_TRIM_GAP) return;
+
+    try {
+      await trimVideo(trimStart, trimEnd);
+      setHoverTime(null);
+      setHoverThumbnail(null);
+    } catch {
+      // error shown by context
     }
-    trimVideo(trimStart, trimEnd);
   };
+
+  if (!duration) {
+    return null;
+  }
 
   return (
     <div className={styles.controlsContainer}>
       <div className={styles.buttonGroup}>
-        {/* Rewind 15 Seconds */}
-        <button
-          className={styles.rewindButton}
-          onClick={handleRewind15}
-          aria-label="Rewind 15 seconds"
-        >
-          <i className="fas fa-undo-alt"></i> -15s
+        <button className={styles.rewindButton} onClick={handleRewind15} aria-label="Rewind 15 seconds" type="button">
+          <i className="fas fa-undo-alt" /> -15s
         </button>
 
-        {/* Play/Pause */}
-        <button
-          className={styles.playPauseButton}
-          onClick={handlePlayPause}
-          aria-label={isPlaying ? "Pause" : "Play"}
-        >
-          {isPlaying ? (
-            <i className="fas fa-pause"></i>
-          ) : (
-            <i className="fas fa-play"></i>
-          )}
+        <button className={styles.playPauseButton} onClick={handlePlayPause} aria-label={isPlaying ? "Pause" : "Play"} type="button">
+          {isPlaying ? <i className="fas fa-pause" /> : <i className="fas fa-play" />}
         </button>
 
-        {/* Forward 15 Seconds */}
-        <button
-          className={styles.forwardButton}
-          onClick={handleForward15}
-          aria-label="Forward 15 seconds"
-        >
-          +15s <i className="fas fa-redo-alt"></i>
+        <button className={styles.forwardButton} onClick={handleForward15} aria-label="Forward 15 seconds" type="button">
+          +15s <i className="fas fa-redo-alt" />
         </button>
 
-        {/* Trim Button */}
         <button
           className={styles.trimButton}
-          onClick={handleTrim}
+          onClick={handleTrimApply}
           aria-label="Trim Video"
-          disabled={trimEnd - trimStart < 1} // Disable if trim region is less than 1 second
+          disabled={isProcessing || trimEnd - trimStart < MIN_TRIM_GAP}
+          type="button"
         >
-          Trim
+          Trim {formatTime(trimStart)} - {formatTime(trimEnd)}
         </button>
       </div>
+
       <div className={styles.progressAndTrimContainer}>
-        {/* Progress Bar with Trimming and Thumbnails */}
         <div
           className={styles.progressBarContainer}
           onClick={handleProgressBarClick}
@@ -397,77 +294,68 @@ const VideoProgressBar = ({ thumbnails = [] }) => {
           onMouseLeave={handleMouseLeave}
           ref={progressBarRef}
         >
-          {/* Thumbnails as Background */}
           {thumbnails.length > 0 && (
             <div className={styles.thumbnailsBackground}>
-              {thumbnails.map((thumbnail, index) => (
-                <img
-                  key={index}
-                  src={thumbnail.src}
-                  alt={`Thumbnail ${index}`}
-                  className={styles.thumbnailImage}
-                  style={{ left: `${(thumbnail.time / videoRef.current.duration) * 100}%` }}
-                />
-              ))}
+              {thumbnails.map((thumbnail, index) => {
+                const leftPct = duration ? (thumbnail.time / duration) * 100 : 0;
+                return (
+                  <Image
+                    key={index}
+                    src={thumbnail.src}
+                    alt={`Thumbnail ${index}`}
+                    className={styles.thumbnailImage}
+                    width={80}
+                    height={58}
+                    unoptimized
+                    style={{ left: `${leftPct}%` }}
+                  />
+                );
+              })}
             </div>
           )}
 
-          {/* Trim Region Overlay */}
           <div
             className={styles.trimRegion}
             style={{
-              left: `${getTrimStartPosition()}%`,
-              width: `${getTrimEndPosition() - getTrimStartPosition()}%`
+              left: `${trimStartPercent}%`,
+              width: `${Math.max(0, trimEndPercent - trimStartPercent)}%`,
             }}
-          ></div>
+          />
 
-          {/* Progress Indicator */}
-          <div
-            className={`${styles.progressIndicator} ${isDragging ? styles.dragging : ''}`}
-            style={{ width: `${progress}%` }}
-          ></div>
+          <div className={`${styles.progressIndicator} ${isDragging ? styles.dragging : ""}`} style={{ width: `${progressPercent}%` }} />
 
-          {/* Playhead Thumb */}
           <div
             className={styles.thumb}
-            style={{ left: `${progress}%` }}
-            onMouseDown={handleDragStart}
-            onTouchStart={handleDragStart}
-            ref={thumbRef}
-          ></div>
+            style={{ left: `${progressPercent}%` }}
+            onMouseDown={handlePlayheadDragStart}
+            onTouchStart={handlePlayheadDragStart}
+          />
 
-          {/* Trim Start Handle */}
           <div
             className={styles.trimHandle}
-            style={{ left: `${getTrimStartPosition()}%` }}
+            style={{ left: `${trimStartPercent}%` }}
             onMouseDown={handleTrimStartDragStart}
             onTouchStart={handleTrimStartDragStart}
-            ref={trimStartRef}
-          ></div>
+          />
 
-          {/* Trim End Handle */}
           <div
             className={styles.trimHandle}
-            style={{ left: `${getTrimEndPosition()}%` }}
+            style={{ left: `${trimEndPercent}%` }}
             onMouseDown={handleTrimEndDragStart}
             onTouchStart={handleTrimEndDragStart}
-            ref={trimEndRef}
-          ></div>
+          />
 
-          {/* Thumbnail Preview on Hover */}
-          {hoverThumbnail && (
-            <div
-              className={`${styles.thumbnailPreview} ${hoverThumbnail ? styles.visible : ''}`}
-              style={{ left: `${(hoverTime / videoRef.current.duration) * 100}%` }}
-            >
-              <img src={hoverThumbnail} alt="Thumbnail preview" />
+          {hoverThumbnail && hoverTime != null && (
+            <div className={`${styles.thumbnailPreview} ${styles.visible}`} style={{ left: `${(hoverTime / duration) * 100}%` }}>
+              <Image src={hoverThumbnail} alt="Thumbnail preview" width={176} height={98} unoptimized />
+              <div className={styles.previewTime}>{formatTime(hoverTime)}</div>
             </div>
           )}
         </div>
 
-        {/* Time Display */}
         <div className={styles.timeDisplay}>
-          {formatTime(trimStart)} / {formatTime(trimEnd)}
+          <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
+          <span>Trim: {formatTime(trimStart)} → {formatTime(trimEnd)}</span>
         </div>
       </div>
     </div>

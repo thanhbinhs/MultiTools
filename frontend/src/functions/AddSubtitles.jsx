@@ -1,199 +1,221 @@
-// AddSubtitlesComponent.jsx
-
-import React, { useState, useContext } from 'react';
-import { VideoContext } from '@/context/VideoContext';
-import axios from 'axios';
+// functions/AddSubtitles.jsx
+import React, { useContext, useState } from "react";
+import { VideoContext } from "@/context/VideoContext";
+import { FaSpinner, FaTimes, FaUpload } from "react-icons/fa";
+import { MdOutlineGeneratingTokens } from "react-icons/md";
 import "../css/app.css";
-import { FaSpinner, FaTimes } from 'react-icons/fa';
-import { MdOutlineGeneratingTokens } from 'react-icons/md';
-import InputFile from '@/components/InputFile';
-import AddFile from '@/components/AddFile';
 
-const AddSubtitles = () => {
-  const { currentVideo, setSubtitlesFile, handleApplySubtitles,isProcessing  } = useContext(VideoContext);
+const AddSubtitles = ({ onClose }) => {
+  const {
+    currentVideo,
+    setSubtitlesFile,
+    generateSubtitles,
+    handleApplySubtitles,
+    isProcessing,
+    error: contextError,
+    clearError,
+  } = useContext(VideoContext);
+
   const [subtitleFile, setSubtitleFile] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [options, setOptions] = useState("normal");
-  const [error, setError] = useState(null);
+  const [localError, setLocalError] = useState(null);
+  const [successMsg, setSuccessMsg] = useState(null);
+  const [activeAction, setActiveAction] = useState(null); // v1 | v2 | apply
 
-  const handleSubtitleUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setSubtitleFile(file);
-    }
+  const setErrorState = (message) => {
+    clearError?.();
+    setLocalError(message || null);
+    setSuccessMsg(null);
   };
 
-  const handleGenerateSubtitles = async (selectedOption) => {
+  const handleGenerate = async (premium) => {
     if (!currentVideo) {
-      alert('Vui lòng tải lên video trước');
+      setErrorState("Vui lòng tải video trước khi tạo phụ đề");
       return;
     }
-  
-    setLoading(true);
-    setError(null);
-  
-    const formData = new FormData();
-  
+
     try {
-      if (currentVideo instanceof File) {
-        // Nếu currentVideo là đối tượng File
-        formData.append('video', currentVideo);
-      } else if (typeof currentVideo === 'string' && currentVideo.startsWith('blob:')) {
-        // Nếu currentVideo là blob URL, chuyển đổi thành tệp
-        const response = await fetch(currentVideo);
-        const blob = await response.blob();
-        const videoFile = new File([blob], 'video.mp4', { type: blob.type });
-        formData.append('video', videoFile);
-      } else if (typeof currentVideo === 'string' && currentVideo.startsWith('http')) {
-        // Nếu currentVideo là URL của tệp video trên máy chủ
-        formData.append('video_url', currentVideo);
-      } else {
-        alert('Định dạng video không hợp lệ');
-        return;
-      }
-  
-      // Chọn endpoint dựa trên option
-      const endpoint =
-        selectedOption === 'premium'
-          ? 'http://localhost:5000/generate-subtitles-premium'
-          : 'http://localhost:5000/generate-subtitles';
-  
-      const res = await axios.post(endpoint, formData, {
-        // Loại bỏ 'Content-Type' header để Axios tự thiết lập
-        responseType: 'blob', // Để nhận tệp VTT dưới dạng Blob
-      });
-  
-      const contentType = res.headers['content-type'];
-  
-      if (
-        contentType.includes('text/vtt') ||
-        contentType.includes('application/x-subrip') ||
-        contentType.includes('text/plain')
-      ) {
-        // Xử lý phản hồi là tệp phụ đề
-        const subtitlesBlob = new Blob([res.data], { type: contentType });
-        const subtitlesFile = new File([subtitlesBlob], 'subtitles.vtt', { type: contentType });
-        setSubtitlesFile(subtitlesFile);
-        alert('Đã tạo phụ đề thành công');
-      } else if (contentType.includes('application/json')) {
-        // Xử lý phản hồi là JSON (có thể là lỗi)
-        const errorText = await res.data.text();
-        const errorData = JSON.parse(errorText);
-        console.error('Lỗi khi tạo phụ đề:', errorData.error);
-        alert('Đã xảy ra lỗi khi tạo phụ đề: ' + (errorData.error || 'Unknown error'));
-        setError(errorData.error || 'Unknown error');
-      } else {
-        // Loại content-type không xác định
-        console.error('Loại phản hồi không xác định:', contentType);
-        alert('Đã xảy ra lỗi khi tạo phụ đề');
-        setError('Đã xảy ra lỗi khi tạo phụ đề');
-      }
-    } catch (error) {
-      console.error('Lỗi khi tạo phụ đề:', error);
-  
-      if (error.response) {
-        // Server trả về phản hồi lỗi
-        const contentType = error.response.headers['content-type'];
-        if (contentType && contentType.includes('application/json')) {
-          try {
-            const errorText = await error.response.data.text();
-            const errorData = JSON.parse(errorText);
-            alert('Đã xảy ra lỗi khi tạo phụ đề: ' + (errorData.error || 'Unknown error'));
-            setError(errorData.error || 'Unknown error');
-          } catch (e) {
-            console.error('Lỗi parse JSON:', e);
-            alert('Đã xảy ra lỗi khi tạo phụ đề');
-            setError('Đã xảy ra lỗi khi tạo phụ đề');
-          }
-        } else {
-          alert('Đã xảy ra lỗi khi tạo phụ đề');
-          setError('Đã xảy ra lỗi khi tạo phụ đề');
-        }
-      } else {
-        alert('Đã xảy ra lỗi khi tạo phụ đề');
-        setError('Đã xảy ra lỗi khi tạo phụ đề');
-      }
+      clearError?.();
+      setLocalError(null);
+      setSuccessMsg(null);
+      setActiveAction(premium ? "v2" : "v1");
+      const generated = await generateSubtitles({ premium });
+      setSuccessMsg(
+        premium
+          ? `Tạo phụ đề Premium thành công: ${generated.name}`
+          : `Tạo phụ đề tự động thành công: ${generated.name}`
+      );
+    } catch {
+      // contextError has the details
     } finally {
-      setLoading(false);
+      setActiveAction(null);
     }
   };
-  
-  const handleAddSubtitleFile = () => {
-    if (!subtitleFile) {
-      alert('Vui lòng chọn tệp phụ đề');
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const fileName = file.name.toLowerCase();
+    if (!fileName.endsWith(".vtt") && !fileName.endsWith(".srt")) {
+      setErrorState("Chỉ hỗ trợ tệp phụ đề .vtt hoặc .srt");
+      event.target.value = "";
       return;
     }
 
-    setSubtitlesFile(subtitleFile); // Lưu trữ đối tượng File
-    alert('Đã thêm tệp phụ đề');
-  }
-
-  const handleOptionClick = (option) => () => {
-    setOptions(option);
-    handleGenerateSubtitles(option);
+    clearError?.();
+    setLocalError(null);
+    setSuccessMsg(null);
+    setSubtitleFile(file);
+    event.target.value = "";
   };
 
-  const handleClose = () => {
-    // Thêm chức năng đóng component nếu cần
+  const handleUseManual = () => {
+    if (!subtitleFile) {
+      setErrorState("Vui lòng chọn tệp phụ đề trước");
+      return;
+    }
+    clearError?.();
+    setLocalError(null);
+    setSubtitlesFile(subtitleFile);
+    setSuccessMsg(`Đã chọn phụ đề thủ công: ${subtitleFile.name}`);
+  };
+
+  const handleApply = async () => {
+    try {
+      clearError?.();
+      setLocalError(null);
+      setSuccessMsg(null);
+      setActiveAction("apply");
+      await handleApplySubtitles();
+      setSuccessMsg("Ghép phụ đề vào video thành công");
+    } catch {
+      // contextError has the details
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const handleCancel = () => {
+    clearError?.();
+    setLocalError(null);
+    setSuccessMsg(null);
+    setSubtitleFile(null);
+    onClose?.();
   };
 
   return (
     <div className="tool-drawer">
       <div className="tool-name">
-        <div></div>
+        <div />
         Thêm phụ đề
-        <button onClick={handleClose} className="icon-cancel" id="icon-cancel">
+        <button type="button" onClick={handleCancel} className="icon-cancel">
           <FaTimes />
         </button>
       </div>
-      <div className="splitter"></div>
+      <div className="splitter" />
 
-      <div className="box--basic" onClick={handleOptionClick("normal")}>
-        {loading ? (
+      {!currentVideo && (
+        <div className="ie-empty-message" style={{ margin: "10px 12px" }}>
+          Chưa có video. Hãy tải video trước khi tạo hoặc ghép phụ đề.
+        </div>
+      )}
+
+      {(localError || contextError) && (
+        <div className="ie-feedback ie-feedback--error" style={{ margin: "8px 12px" }}>
+          ⚠ {localError || contextError}
+        </div>
+      )}
+      {successMsg && (
+        <div className="ie-feedback ie-feedback--success" style={{ margin: "8px 12px" }}>
+          ✓ {successMsg}
+        </div>
+      )}
+
+      <div
+        className="box--basic"
+        onClick={() => !isProcessing && handleGenerate(false)}
+        style={{ cursor: isProcessing ? "not-allowed" : "pointer", opacity: isProcessing && activeAction !== "v1" ? 0.6 : 1 }}
+      >
+        {isProcessing && activeAction === "v1" ? (
           <>
-            <FaSpinner className="removebg-icon spinner" /> Đang tạo...
+            <FaSpinner className="removebg-icon spinner" /> Đang tạo phụ đề tự động...
           </>
         ) : (
           <>
-            <MdOutlineGeneratingTokens className="removebg-icon" /> Tạo phụ đề V1
+            <MdOutlineGeneratingTokens className="removebg-icon" /> Tạo phụ đề tự động
           </>
         )}
       </div>
 
-      <div className="box--basic" onClick={handleOptionClick("premium")}>
-        {loading ? (
+      <div
+        className="box--basic"
+        onClick={() => !isProcessing && handleGenerate(true)}
+        style={{ cursor: isProcessing ? "not-allowed" : "pointer", opacity: isProcessing && activeAction !== "v2" ? 0.6 : 1 }}
+      >
+        {isProcessing && activeAction === "v2" ? (
           <>
-            <FaSpinner className="removebg-icon spinner" /> Đang tạo...
+            <FaSpinner className="removebg-icon spinner" /> Đang tạo phụ đề Premium...
           </>
         ) : (
           <>
-            <MdOutlineGeneratingTokens className="removebg-icon" /> Tạo phụ đề V2
+            <MdOutlineGeneratingTokens className="removebg-icon" /> Tạo phụ đề Premium
           </>
         )}
       </div>
-      <div className="bottom-content">
-        <div className="action-btn">
-          <button id="crop-action-cancel" onClick={{}}>
-            Hủy
+
+      <div style={{ padding: "8px 12px" }}>
+        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 6 }}>
+          Hoặc dùng tệp phụ đề thủ công (.vtt / .srt)
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <label
+            style={{
+              flex: 1,
+              background: "#333",
+              border: "1px solid #555",
+              borderRadius: 6,
+              padding: "8px 10px",
+              cursor: "pointer",
+              fontSize: 13,
+              color: "#ccc",
+              textAlign: "center",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <FaUpload /> {subtitleFile ? subtitleFile.name : "Chọn tệp phụ đề"}
+            <input type="file" accept=".vtt,.srt" onChange={handleFileUpload} style={{ display: "none" }} />
+          </label>
+          <button className="btn" type="button" onClick={handleUseManual} disabled={!subtitleFile || isProcessing}>
+            Dùng
           </button>
-          {
-            isProcessing ? (
-              <button id="crop-action-apply" disabled style={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-              }}>
-                <FaSpinner className="removebg-icon spinner" /> Áp dụng
-              </button>
-            ) : (
-              <button id="crop-action-apply" onClick={handleApplySubtitles}>
-                Áp dụng
-              </button>
-            )
-          }
         </div>
       </div>
 
+      <div className="bottom-content">
+        <div className="action-btn">
+          <button id="crop-action-cancel" type="button" onClick={handleCancel}>
+            Hủy
+          </button>
+          <button
+            id="crop-action-apply"
+            type="button"
+            onClick={handleApply}
+            disabled={isProcessing || !currentVideo}
+            style={isProcessing && activeAction === "apply" ? { display: "flex", alignItems: "center", gap: 6 } : {}}
+          >
+            {isProcessing && activeAction === "apply" ? (
+              <>
+                <FaSpinner className="spinner" /> Đang ghép...
+              </>
+            ) : (
+              "Áp dụng vào video"
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

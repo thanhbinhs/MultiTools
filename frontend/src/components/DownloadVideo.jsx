@@ -10,8 +10,6 @@ const Download = ({ closeModal }) => {
   const { handleDownload } = useContext(VideoContext);
 
   const handleDownloadClick = () => {
-    console.log("Image Name:", videoName);
-    console.log("Image Format:", videoFormat);
     handleDownload({ videoName, videoFormat });
     closeModal();
   };
@@ -19,16 +17,16 @@ const Download = ({ closeModal }) => {
   return (
     <div className="modal-overlay">
       <div className="modal-content">
-        <h2>Tải ảnh xuống</h2>
+        <h2>Tải video xuống</h2>
 
         <div className="form-group">
-          <label htmlFor="videoName">Tên ảnh:</label>
+          <label htmlFor="videoName">Tên video:</label>
           <input
             id="videoName"
             type="text"
             value={videoName}
             onChange={(e) => setVideoName(e.target.value)}
-            placeholder="Nhập tên ảnh"
+            placeholder="Nhập tên video"
           />
         </div>
 

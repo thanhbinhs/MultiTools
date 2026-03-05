@@ -1,12 +1,17 @@
 // VideoDisplay.jsx
 
-import React, { useRef, useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { VideoContext } from "@/context/VideoContext";
 import styles from "../css/VideoDisplay.module.css";
 import InputFile from "./InputFile";
 import VideoProgressBar from "./VideoProgressBar";
 
-const VideoDisplay = ({ mode }) => {
+const THUMB_MIN = 8;
+const THUMB_MAX = 24;
+
+const clamp = (n, min, max) => Math.max(min, Math.min(n, max));
+
+const VideoDisplay = () => {
   const {
     currentVideo,
     videoRef,
@@ -14,205 +19,200 @@ const VideoDisplay = ({ mode }) => {
     setVideoParameters,
     subtitlesFile,
     setInitialVideo,
+    isProcessing,
+    progress,
+    error,
+    clearError,
   } = useContext(VideoContext);
 
   const [videoUrl, setVideoUrl] = useState(null);
   const [subtitlesUrl, setSubtitlesUrl] = useState(null);
-  const [thumbnails, setThumbnails] = useState([]); // State for thumbnails
+  const [thumbnails, setThumbnails] = useState([]);
 
   const videoDisplayRef = useRef(null);
-  const hiddenVideoRef = useRef(null); // Hidden video for thumbnail generation
+  const hiddenVideoRef = useRef(null);
 
-  // Convert currentVideo or URL to videoUrl
   useEffect(() => {
-    if (currentVideo) {
-      if (currentVideo instanceof File) {
-        const url = URL.createObjectURL(currentVideo);
-        setVideoUrl(url);
-
-        // Revoke URL when not needed
-        return () => {
-          URL.revokeObjectURL(url);
-        };
-      } else if (typeof currentVideo === "string") {
-        setVideoUrl(currentVideo);
-      }
-    } else {
+    if (!currentVideo) {
       setVideoUrl(null);
+      setThumbnails([]);
+      return;
     }
+
+    if (currentVideo instanceof File) {
+      const url = URL.createObjectURL(currentVideo);
+      setVideoUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+
+    if (typeof currentVideo === "string") {
+      setVideoUrl(currentVideo);
+      return;
+    }
+
+    setVideoUrl(null);
+    setThumbnails([]);
   }, [currentVideo]);
 
-  // Convert subtitlesFile or URL to subtitlesUrl
   useEffect(() => {
-    if (subtitlesFile) {
-      if (subtitlesFile instanceof File) {
-        const url = URL.createObjectURL(subtitlesFile);
-        setSubtitlesUrl(url);
-
-        // Revoke URL when not needed
-        return () => {
-          URL.revokeObjectURL(url);
-        };
-      } else if (typeof subtitlesFile === "string") {
-        setSubtitlesUrl(subtitlesFile);
-      }
-    } else {
+    if (!subtitlesFile) {
       setSubtitlesUrl(null);
+      return;
     }
+
+    if (subtitlesFile instanceof File) {
+      const url = URL.createObjectURL(subtitlesFile);
+      setSubtitlesUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+
+    if (typeof subtitlesFile === "string") {
+      setSubtitlesUrl(subtitlesFile);
+      return;
+    }
+
+    setSubtitlesUrl(null);
   }, [subtitlesFile]);
 
-  // Update video parameters
   useEffect(() => {
+    const visibleVideo = videoRef.current;
+    if (!visibleVideo) return;
+
     const updateVideoParameters = () => {
-      if (videoRef.current) {
-        const rect = videoRef.current.getBoundingClientRect();
-        const width = rect.width;
-        const height = rect.height;
-        const left = rect.left + window.scrollX;
-        const top = rect.top + window.scrollY;
-
-        setVideoParameters({ width, height, left, top });
-        console.log("Video Parameters:", { width, height, left, top });
-      }
+      if (!videoRef.current) return;
+      const rect = videoRef.current.getBoundingClientRect();
+      setVideoParameters({
+        width: rect.width,
+        height: rect.height,
+        left: rect.left + window.scrollX,
+        top: rect.top + window.scrollY,
+      });
     };
 
-    const handleVideoLoad = () => {
+    const handleVideoLoad = () => updateVideoParameters();
+
+    visibleVideo.addEventListener("loadedmetadata", handleVideoLoad);
+    window.addEventListener("resize", updateVideoParameters);
+
+    if (visibleVideo.readyState >= 1) {
       updateVideoParameters();
-    };
-
-    if (videoRef.current) {
-      if (videoRef.current.readyState >= 2) {
-        updateVideoParameters();
-      } else {
-        videoRef.current.onloadedmetadata = handleVideoLoad;
-      }
-
-      // Cleanup
-      return () => {
-        if (videoRef.current) {
-          videoRef.current.onloadedmetadata = null;
-        }
-      };
     }
-  }, [currentVideo, setVideoParameters, videoRef]);
+
+    return () => {
+      visibleVideo.removeEventListener("loadedmetadata", handleVideoLoad);
+      window.removeEventListener("resize", updateVideoParameters);
+    };
+  }, [videoRef, setVideoParameters, currentVideo]);
 
   useEffect(() => {
-    if (videoUrl) {
-      const videoElement = hiddenVideoRef.current;
-      if (!videoElement) return;
-  
-      let cancelled = false; // Flag to cancel ongoing tasks
-  
-      const handleLoadedMetadata = () => {
-        const duration = videoElement.duration;
-        if (!isFinite(duration) || duration <= 0) {
-          console.error('Video duration is not finite or invalid:', duration);
+    const hidden = hiddenVideoRef.current;
+    if (!hidden || !videoUrl) {
+      setThumbnails([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const waitForSeek = (videoEl, time) =>
+      new Promise((resolve) => {
+        if (Math.abs((videoEl.currentTime || 0) - time) < 0.01) {
+          setTimeout(resolve, 20);
           return;
         }
-  
-        const interval = 10; // Seconds between thumbnails
-        const thumbnailsArray = [];
-        const totalThumbnails = Math.floor(duration / interval);
-        let currentTime = 0;
-  
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        // Reduce canvas resolution for speed
-        const canvasWidth = 160;
-        const canvasHeight = 90;
-        canvas.width = canvasWidth;
-        canvas.height = canvasHeight;
-  
-        const captureThumbnails = async () => {
-          for (let i = 0; i < totalThumbnails; i++) {
-            currentTime = i * interval;
-            try {
-              await new Promise((resolve, reject) => {
-                const onSeeked = () => {
-                  if (cancelled) {
-                    videoElement.removeEventListener("seeked", onSeeked);
-                    reject(new Error("Thumbnail generation cancelled"));
-                    return;
-                  }
-  
-                  ctx.drawImage(videoElement, 0, 0, canvasWidth, canvasHeight);
-                  const dataURL = canvas.toDataURL("image/jpeg");
-                  thumbnailsArray.push({ time: currentTime, src: dataURL });
-                  videoElement.removeEventListener("seeked", onSeeked);
-                  resolve();
-                };
-  
-                videoElement.addEventListener("seeked", onSeeked);
-                videoElement.currentTime = currentTime;
-              });
-            } catch (error) {
-              console.error(`Error capturing thumbnail at ${currentTime}s:`, error);
-              if (cancelled) return;
-            }
-          }
-  
-          // Capture a thumbnail near the end if not evenly divisible
-          if (duration % interval !== 0) {
-            currentTime = Math.max(duration - 0.1, 0);
-            try {
-              await new Promise((resolve, reject) => {
-                const onSeeked = () => {
-                  if (cancelled) {
-                    videoElement.removeEventListener("seeked", onSeeked);
-                    reject(new Error("Thumbnail generation cancelled"));
-                    return;
-                  }
-  
-                  ctx.drawImage(videoElement, 0, 0, canvasWidth, canvasHeight);
-                  const dataURL = canvas.toDataURL("image/jpeg");
-                  thumbnailsArray.push({ time: currentTime, src: dataURL });
-                  videoElement.removeEventListener("seeked", onSeeked);
-                  resolve();
-                };
-  
-                videoElement.addEventListener("seeked", onSeeked);
-                videoElement.currentTime = currentTime;
-              });
-            } catch (error) {
-              console.error(`Error capturing thumbnail at ${currentTime}s:`, error);
-              if (cancelled) return;
-            }
-          }
-  
-          if (!cancelled) {
-            setThumbnails(thumbnailsArray);
-            console.log('Thumbnails generated:', thumbnailsArray);
-          }
+
+        const onSeeked = () => {
+          clearTimeout(timeoutId);
+          videoEl.removeEventListener("seeked", onSeeked);
+          resolve();
         };
-  
-        captureThumbnails();
-      };
-  
-      videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
-  
-      // Start loading the hidden video
-      videoElement.load();
-  
-      // Cleanup
-      return () => {
-        cancelled = true; // Mark as cancelled
-        videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      };
-    }
+        videoEl.addEventListener("seeked", onSeeked);
+
+        const timeoutId = setTimeout(() => {
+          videoEl.removeEventListener("seeked", onSeeked);
+          resolve();
+        }, 500);
+
+        videoEl.currentTime = time;
+      });
+
+    const buildThumbnails = async () => {
+      const duration = hidden.duration;
+      if (!Number.isFinite(duration) || duration <= 0) {
+        setThumbnails([]);
+        return;
+      }
+
+      const targetCount = clamp(Math.round(duration / 7), THUMB_MIN, THUMB_MAX);
+      const times = Array.from({ length: targetCount }, (_, idx) =>
+        targetCount === 1
+          ? 0
+          : Math.min(duration - 0.05, (duration * idx) / (targetCount - 1))
+      );
+
+      const canvas = document.createElement("canvas");
+      const w = 200;
+      const h = 112;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        setThumbnails([]);
+        return;
+      }
+
+      const next = [];
+      for (const t of times) {
+        if (cancelled) return;
+        await waitForSeek(hidden, t);
+        if (cancelled) return;
+        try {
+          ctx.drawImage(hidden, 0, 0, w, h);
+          next.push({ time: t, src: canvas.toDataURL("image/jpeg", 0.75) });
+        } catch {
+          // skip bad frame
+        }
+      }
+
+      if (!cancelled) {
+        setThumbnails(next);
+      }
+    };
+
+    const handleLoadedData = () => {
+      buildThumbnails();
+    };
+
+    hidden.addEventListener("loadeddata", handleLoadedData);
+    hidden.load();
+
+    return () => {
+      cancelled = true;
+      hidden.removeEventListener("loadeddata", handleLoadedData);
+    };
   }, [videoUrl]);
 
   return (
     <div ref={videoDisplayRef} className={styles.videoContainer}>
       {videoUrl ? (
         <div className={styles.videoWrapper}>
-          {/* Visible Video for User */}
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            controls={false} // Hide default controls to use custom controls
-            className={styles.videoElement}
-            style={{
-              filter: `
+          <div className={styles.stageHeader}>
+            <span className={styles.stageBadge}>Video Editor</span>
+            {error ? (
+              <button className={styles.clearErrorBtn} type="button" onClick={clearError}>
+                Xóa thông báo lỗi
+              </button>
+            ) : null}
+          </div>
+
+          <div className={styles.playerArea}>
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              controls={false}
+              className={styles.videoElement}
+              preload="metadata"
+              style={{
+                filter: `
                   brightness(${adjustmentData.brightness}%)
                   saturate(${adjustmentData.saturation}%)
                   contrast(${adjustmentData.contrast}%)
@@ -222,41 +222,48 @@ const VideoDisplay = ({ mode }) => {
                   invert(${adjustmentData.invert}%)
                   blur(${adjustmentData.blur}px)
                 `,
-            }}
-          >
-            {subtitlesUrl && (
-              <track
-                kind="subtitles"
-                src={subtitlesUrl}
-                srcLang="en"
-                label="English"
-                default
-              />
-            )}
-            Your browser does not support the video tag.
-          </video>
+              }}
+            >
+              {subtitlesUrl && (
+                <track kind="subtitles" src={subtitlesUrl} srcLang="vi" label="Vietnamese" default />
+              )}
+              Trình duyệt của bạn không hỗ trợ video.
+            </video>
 
-          {/* Hidden Video for Thumbnail Generation */}
-          <video
-            ref={hiddenVideoRef}
-            src={videoUrl}
-            style={{ display: "none" }}
-            preload="metadata" // Load metadata as soon as possible
-            crossOrigin="anonymous" // Ensure CORS access if video is from a different source
-          />
+            <video
+              ref={hiddenVideoRef}
+              src={videoUrl}
+              style={{ display: "none" }}
+              preload="metadata"
+              muted
+              playsInline
+              crossOrigin="anonymous"
+            />
 
-          {/* Integrated VideoProgressBar */}
+            {isProcessing ? (
+              <div className={styles.processingOverlay}>
+                <div className={styles.processingCard}>
+                  <div className={styles.processingTitle}>Đang xử lý video...</div>
+                  <div className={styles.processingBarTrack}>
+                    <div className={styles.processingBarFill} style={{ width: `${Math.max(8, progress || 0)}%` }} />
+                  </div>
+                  <div className={styles.processingPercent}>{Math.round(progress || 0)}%</div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {error ? <div className={styles.errorBanner}>⚠ {error}</div> : null}
+
           <VideoProgressBar thumbnails={thumbnails} />
         </div>
       ) : (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <InputFile setFile={setInitialVideo} type="Video" />
+        <div className={styles.emptyStateWrap}>
+          <div className={styles.emptyStateCard}>
+            <h3>Bắt đầu chỉnh sửa video</h3>
+            <p>Tải video lên để dùng bộ lọc, cắt video, và ghép phụ đề.</p>
+            <InputFile setFile={setInitialVideo} type="Video" />
+          </div>
         </div>
       )}
     </div>

@@ -8,11 +8,15 @@ const VideoUpload = () => {
   const { setInitialVideo } = useContext(VideoContext);
 
   const handleVideoUpload = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (file) {
-      // Truyền đối tượng File thay vì blob URL
+      if (!file.type?.startsWith("video/")) {
+        e.target.value = "";
+        return;
+      }
       setInitialVideo(file);
     }
+    e.target.value = "";
   };
 
   return (
@@ -20,16 +24,19 @@ const VideoUpload = () => {
       <label
         htmlFor="video"
         style={{
-          color: "whitesmoke",
-          padding: "12px 16px",
+          color: "#dbe8ff",
+          padding: "10px 14px",
           cursor: "pointer",
-          fontSize: "16px",
+          fontSize: "14px",
           display: "flex",
           alignItems: "center",
-          gap: "5px",
+          gap: "7px",
+          border: "1px solid rgba(255,255,255,0.2)",
+          borderRadius: "10px",
+          background: "rgba(255,255,255,0.06)",
         }}
       >
-       <LuFileVideo/>
+       <LuFileVideo />
         Thêm video
       </label>
       <input

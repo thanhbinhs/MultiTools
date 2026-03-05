@@ -9,11 +9,11 @@ const Download = ({ closeModal }) => {
   const [imageFormat, setImageFormat] = useState("jpeg");
   const { handleDownload } = useContext(ImageContext);
 
-  const handleDownloadClick = () => {
-    console.log("Image Name:", imageName);
-    console.log("Image Format:", imageFormat);
-    handleDownload({ imageName, imageFormat });
-    closeModal();
+  const handleDownloadClick = async () => {
+    const ok = await handleDownload({ imageName, imageFormat });
+    if (ok !== false) {
+      closeModal();
+    }
   };
 
   return (

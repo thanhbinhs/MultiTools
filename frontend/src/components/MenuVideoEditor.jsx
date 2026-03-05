@@ -1,15 +1,12 @@
 import React, { useContext, useState } from 'react';
 import {
   FaHome,
-  FaCut,
-  FaMagic,
-  FaPaintBrush,
 } from 'react-icons/fa';
 import {
   HiAdjustmentsHorizontal,
 } from 'react-icons/hi2';
 import {
-  MdTextFields,
+  MdContentCut,
   MdSubtitles,
 } from 'react-icons/md';
 import '../css/menuEditor.css';
@@ -20,18 +17,18 @@ import FilterVideo from '@/functions/FilterVideo';
 
 const menuItems = [
   { id: 'filters', name: 'Bộ lọc', icon: <HiAdjustmentsHorizontal /> },
+  { id: 'trim', name: 'Cắt video', icon: <MdContentCut /> },
   { id: 'subtitles', name: 'Thêm phụ đề', icon: <MdSubtitles /> },
-  // Thêm các công cụ khác nếu cần
 ];
 
 export default function MenuVideoEditor({ onMode }) {
-  const [selectedMenu, setSelectedMenu] = useState(null);
+  const [selectedMenu, setSelectedMenu] = useState('filters');
   const [hoveredItem, setHoveredItem] = useState(null);
   const { setMode } = useContext(VideoContext);
 
   const handleMenuClick = (menuId) => {
     setSelectedMenu(menuId);
-    onMode(menuId);
+    onMode?.(menuId);
     setMode(menuId);
   };
 
@@ -61,7 +58,7 @@ export default function MenuVideoEditor({ onMode }) {
             <li
               key={item.id}
               data={item.id}
-              id={`menu-item-box ${item.id}`}
+              id={`menu-item-${item.id}`}
               className={`menu-item-box ${
                 hoveredItem === item.id ? 'hovered' : ''
               } ${selectedMenu === item.id ? 'active' : ''}`}
@@ -78,7 +75,7 @@ export default function MenuVideoEditor({ onMode }) {
 
       <div className="menu-right">
         {selectedMenu === "filters" && <FilterVideo />}
-        {/* {selectedMenu === "text" && <AddTextComponent />} */}
+        {selectedMenu === "trim" && <TrimVideo />}
         {selectedMenu === "subtitles" && <AddSubtitles />}
       </div>
     </section>

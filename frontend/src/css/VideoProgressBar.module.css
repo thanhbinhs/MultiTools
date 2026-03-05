@@ -1,102 +1,113 @@
-/* VideoProgressBar.module.css */
-
 .controlsContainer {
   display: flex;
   flex-direction: column;
+  gap: 10px;
   width: 100%;
-  user-select: none; /* Prevent text selection during drag */
+  user-select: none;
+  padding: 4px 2px 0;
 }
 
 .buttonGroup {
   display: flex;
   justify-content: center;
-  margin: 10px 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .rewindButton,
 .playPauseButton,
 .forwardButton,
 .trimButton {
-  background: none;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #edf3ff;
   cursor: pointer;
-  margin: 0 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  padding: 8px 12px;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.rewindButton:hover,
+.playPauseButton:hover,
+.forwardButton:hover,
+.trimButton:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.playPauseButton {
+  min-width: 46px;
   font-size: 16px;
-  color: #fff; /* Adjust based on your design */
 }
 
 .trimButton {
+  border-color: rgba(88, 176, 255, 0.65);
+  background: linear-gradient(180deg, #248ee3, #1b74be);
   color: white;
-  padding: 0.4em 1.2em;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  border-radius: 0.5em;
-  background-color: #2490d9;
-
-}
-
-.trimButton:hover {
-  background-color: #0067ac;
+  font-weight: 600;
 }
 
 .trimButton:disabled {
-  background-color: #6c757d;
+  background: rgba(108, 117, 125, 0.35);
+  border-color: rgba(140, 147, 158, 0.35);
+  color: rgba(233, 236, 241, 0.62);
   cursor: not-allowed;
+  transform: none;
 }
 
 .progressAndTrimContainer {
   position: relative;
   width: 100%;
-  max-width: 800px; /* Adjust as needed */
-  margin: 0 auto; /* Center the container */
+  margin: 0 auto;
 }
 
 .progressBarContainer {
   position: relative;
   width: 100%;
-  height: 50px;
-  background-color: #ccc;
-  cursor: pointer;
-  border-radius: 5px;
+  height: 58px;
+  border-radius: 10px;
   overflow: hidden;
+  cursor: pointer;
+  background: rgba(13, 17, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .thumbnailsBackground {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  inset: 0;
   z-index: 1;
 }
 
 .thumbnailImage {
   position: absolute;
   top: 0;
-  height: 50px;
+  height: 58px;
+  width: 80px;
   object-fit: cover;
+  opacity: 0.6;
 }
 
 .trimRegion {
   position: absolute;
-  top: 0;
-  height: 100%;
-  background-color: rgba(0, 123, 255, 0.2); /* Semi-transparent blue for trim region */
+  inset-block: 0;
+  background: rgba(44, 152, 255, 0.2);
   z-index: 2;
+  border-inline: 1px dashed rgba(109, 191, 255, 0.72);
 }
 
 .progressIndicator {
   position: absolute;
-  top: 0;
+  inset-block: 0;
   left: 0;
-  height: 100%;
-  background-color: rgba(0, 123, 255, 0.6);
+  background: linear-gradient(90deg, rgba(82, 177, 255, 0.6), rgba(89, 219, 182, 0.6));
   z-index: 3;
-  transition: width 0.1s linear;
+  transition: width 0.08s linear;
 }
 
 .dragging {
-  background-color: rgba(255, 255, 255, 0.7);
+  background: linear-gradient(90deg, rgba(123, 207, 255, 0.78), rgba(98, 226, 192, 0.78));
 }
 
 .thumb {
@@ -104,62 +115,88 @@
   top: 50%;
   width: 14px;
   height: 14px;
-  background-color: #fff;
-  border: 2px solid rgb(0, 123, 255);
   border-radius: 50%;
-  cursor: pointer;
   transform: translate(-50%, -50%);
+  background: #ffffff;
+  border: 2px solid #1e8be1;
   z-index: 4;
+  cursor: grab;
 }
 
 .thumb:hover {
-  background-color: #e0e0e0;
-  transform: translate(-50%, -50%) scale(1.2);
+  transform: translate(-50%, -50%) scale(1.15);
 }
 
 .trimHandle {
   position: absolute;
-  top: -4px; /* Adjust as needed */
+  top: 4px;
+  bottom: 4px;
   width: 12px;
-  height: 48px;
-  background-color: #ffc107; /* Amber color for visibility */
-  cursor: ew-resize;
-  transform: translateX(-50%);
-  z-index: 5; /* Ensure it's above other elements */
   border-radius: 4px;
-}
-
-.trimHandle:hover {
-  background-color: #e0a800;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, #ffd15f, #f5a40e);
+  border: 1px solid rgba(58, 38, 0, 0.42);
+  cursor: ew-resize;
+  z-index: 5;
 }
 
 .thumbnailPreview {
   position: absolute;
   bottom: 100%;
   transform: translateX(-50%);
-  margin-bottom: 10px;
-  display: none;
-  pointer-events: none; /* Prevent interference with mouse events */
-  z-index: 6;
-  width: 160px;
-  height: 90px;
-  border: 1px solid #ccc;
-  background-color: #000;
+  margin-bottom: 12px;
+  width: 176px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+  pointer-events: none;
+  background: #0b1018;
+  z-index: 8;
 }
 
-.thumbnailPreview.visible {
+.visible {
   display: block;
 }
 
 .thumbnailPreview img {
   width: 100%;
-  height: 100%;
+  height: 98px;
   object-fit: cover;
+  display: block;
+}
+
+.previewTime {
+  font-size: 11px;
+  color: #dce5f4;
+  padding: 4px 6px;
+  text-align: center;
 }
 
 .timeDisplay {
-  margin-top: 5px;
-  font-size: 14px;
-  color: #333;
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  color: #b8c8df;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .buttonGroup {
+    justify-content: flex-start;
+  }
+
+  .progressBarContainer {
+    height: 50px;
+  }
+
+  .thumbnailImage {
+    height: 50px;
+    width: 72px;
+  }
+
+  .timeDisplay {
+    flex-direction: column;
+    gap: 4px;
+  }
 }

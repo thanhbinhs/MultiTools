@@ -1,34 +1,178 @@
-/* VideoDisplay.module.css */
-
 .videoContainer {
-    display: flex;
-    justify-content: center;
-    padding-top: 10px;
-    flex: 1;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+}
 
-    height: 100%;
-    position: relative;
-    overflow: hidden;
-    background-color: #2e2e2e;
+.videoWrapper {
+  width: min(1120px, 100%);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 10px;
+}
+
+.stageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stageBadge {
+  color: #d8e4ff;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid rgba(113, 177, 255, 0.4);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(64, 130, 217, 0.18);
+}
+
+.clearErrorBtn {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8edf7;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.clearErrorBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.playerArea {
+  position: relative;
+  min-height: 320px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at 20% 10%, rgba(80, 153, 255, 0.18), transparent 44%),
+    linear-gradient(180deg, #111823, #0c1119);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.videoElement {
+  width: 100%;
+  height: 100%;
+  max-height: min(62vh, 680px);
+  object-fit: contain;
+  background: #05070b;
+}
+
+.processingOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 10, 15, 0.58);
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(2px);
+}
+
+.processingCard {
+  width: min(420px, 86%);
+  background: rgba(20, 24, 34, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.processingTitle {
+  color: #f2f6ff;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.processingBarTrack {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.processingBarFill {
+  height: 100%;
+  background: linear-gradient(90deg, #4da6ff, #6fd8c2);
+  transition: width 200ms ease;
+}
+
+.processingPercent {
+  margin-top: 8px;
+  color: #bfd6ff;
+  font-size: 12px;
+  text-align: right;
+}
+
+.errorBanner {
+  border-radius: 10px;
+  background: rgba(190, 39, 39, 0.16);
+  border: 1px solid rgba(228, 90, 90, 0.52);
+  color: #ffd2d2;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.emptyStateWrap {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.emptyStateCard {
+  width: min(760px, 96%);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at 80% 0%, rgba(93, 184, 255, 0.2), transparent 46%),
+    linear-gradient(180deg, #121822, #0d1219);
+  padding: 22px;
+  color: #d8deea;
+}
+
+.emptyStateCard h3 {
+  margin: 0 0 8px;
+  color: #f0f5ff;
+  font-size: 20px;
+}
+
+.emptyStateCard p {
+  margin: 0 0 16px;
+  color: #acb8cb;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .videoContainer {
+    padding: 10px;
   }
-  
+
+  .videoWrapper {
+    gap: 8px;
+  }
+
+  .playerArea {
+    min-height: 220px;
+    border-radius: 12px;
+  }
+
   .videoElement {
-    height: 500px;
-    object-fit: contain; /* Giữ tỷ lệ khung hình gốc */
-    filter: 
-      brightness(var(--brightness)) 
-      contrast(var(--contrast)) 
-      saturate(var(--saturation)) 
-      hue-rotate(var(--hue)deg) 
-      grayscale(var(--grey_scale)) 
-      sepia(var(--sepia)) 
-      invert(var(--invert)) 
-      blur(var(--blur));
-    transition: filter 0.3s ease; /* Smooth transition for filter changes */
+    max-height: min(46vh, 420px);
   }
-  
-  .placeholder {
-    color: #fff;
-    font-size: 1.2em;
+
+  .emptyStateCard {
+    padding: 14px;
   }
-  
+}

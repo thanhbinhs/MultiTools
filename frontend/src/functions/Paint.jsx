@@ -1,748 +1,693 @@
-// Paint.jsx
-import { ImageContext } from "@/context/ImageContext";
-import { Input } from "@nextui-org/react";
-import { set } from "mongoose";
+// functions/Paint.jsx
 import React, {
-  useRef,
-  useEffect,
-  useState,
-  useContext,
-  useLayoutEffect,
+  useRef, useEffect, useState, useContext, useLayoutEffect, useCallback,
 } from "react";
+import { createPortal } from "react-dom";
+import { ImageContext } from "@/context/ImageContext";
 import {
-  FaAngleDown,
-  FaEraser,
-  FaMousePointer,
-  FaPaintBrush,
+  FaEraser, FaMousePointer, FaPaintBrush, FaTimes,
 } from "react-icons/fa";
 import { IoShapesOutline } from "react-icons/io5";
 import {
-  RiCircleLine,
-  RiLineChartLine,
-  RiLineHeight,
-  RiRectangleLine,
-  RiTriangleLine,
+  RiCircleLine, RiRectangleLine, RiTriangleLine,
 } from "react-icons/ri";
+import { GiStraightPipe } from "react-icons/gi";
 import rough from "roughjs/bundled/rough.esm";
 import getStroke from "perfect-freehand";
-import { GiStraightPipe } from "react-icons/gi";
-import "../css/menuEditor.css";
 
+// ─── RoughJS generator ───────────────────────────────────────────────────────
 const generator = rough.generator();
+const BRUSH_MIN = 1;
+const BRUSH_MAX = 64;
+const COLOR_PRESETS = [
+  "#ffffff", "#111827", "#ef4444", "#f97316", "#eab308", "#22c55e",
+  "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+];
 
+// ─── Element creation ────────────────────────────────────────────────────────
 function createElement(id, x1, y1, x2, y2, type, shape, options) {
-  let roughElement;
   if (type === "shape") {
     const minX = Math.min(x1, x2);
     const minY = Math.min(y1, y2);
-    const width = Math.abs(x2 - x1);
-    const height = Math.abs(y2 - y1);
+    const w    = Math.abs(x2 - x1);
+    const h    = Math.abs(y2 - y1);
+    let roughEl;
 
-    // Tạo hình dạng dựa trên giá trị của shape
-    if (shape === "rectangle") {
-      roughElement = generator.rectangle(minX, minY, width, height, options);
-    } else if (shape === "circle") {
-      const radius = Math.min(width, height) / 2;
-      roughElement = generator.circle(
-        minX + radius,
-        minY + radius,
-        radius * 2,
-        options
-      );
-    } else if (shape === "triangle") {
-      roughElement = generator.polygon(
-        [
-          [x1, y2],
-          [(x1 + x2) / 2, y1],
-          [x2, y2],
-        ],
-        options
-      );
-    } else if (shape === "line") {
-      roughElement = generator.line(x1, y1, x2, y2, options);
+    switch (shape) {
+      case "rectangle":
+        roughEl = generator.rectangle(minX, minY, w, h, options); break;
+      case "circle": {
+        const r = Math.min(w, h) / 2;
+        roughEl = generator.circle(minX + r, minY + r, r * 2, options); break;
+      }
+      case "triangle":
+        roughEl = generator.polygon([[x1, y2], [(x1 + x2) / 2, y1], [x2, y2]], options); break;
+      case "line":
+        roughEl = generator.line(x1, y1, x2, y2, options); break;
+      default: break;
     }
-    return { id, x1, y1, x2, y2, type, shape, roughElement };
-  } else if (type === "pen") {
+    return {
+      id,
+      x1,
+      y1,
+      x2,
+      y2,
+      type,
+      shape,
+      roughElement: roughEl,
+      stroke: options.stroke,
+      strokeWidth: options.strokeWidth,
+      opacity: options.opacity ?? 1,
+    };
+  }
+  if (type === "pen") {
     return {
       id,
       type,
       points: [{ x: x1, y: y1 }],
       stroke: options.stroke,
       strokeWidth: options.strokeWidth,
+      opacity: options.opacity ?? 1,
     };
   }
+  return null;
 }
 
-function nearPoint(x, y, x1, y1, point) {
-  return Math.abs(x - x1) < 5 && Math.abs(y - y1) < 5 ? point : null;
-}
-
-const onLine = (x1, y1, x2, y2, x, y, maxDistance = 1) => {
-  const a = { x: x1, y: y1 };
-  const b = { x: x2, y: y2 };
-  const c = { x, y };
-  const offset = distance(a, b) - (distance(a, c) + distance(b, c));
-  return Math.abs(offset) < maxDistance ? "inside" : null;
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const toRgba = (hex, alpha = 1) => {
+  if (!hex || typeof hex !== "string") return `rgba(255,255,255,${alpha})`;
+  const raw = hex.replace("#", "");
+  const normalized = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+  const n = parseInt(normalized, 16);
+  if (Number.isNaN(n)) return `rgba(255,255,255,${alpha})`;
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
-const positionWithinElement = (x, y, element) => {
-  const { type, shape, x1, x2, y1, y2 } = element;
+// ─── Geometry helpers ────────────────────────────────────────────────────────
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+const onLine = (x1, y1, x2, y2, x, y, maxD = 1) => {
+  const d = dist({ x: x1, y: y1 }, { x: x2, y: y2 }) - (dist({ x: x1, y: y1 }, { x, y }) + dist({ x: x2, y: y2 }, { x, y }));
+  return Math.abs(d) < maxD ? "inside" : null;
+};
+
+const nearPoint = (x, y, px, py, name) =>
+  Math.abs(x - px) < 5 && Math.abs(y - py) < 5 ? name : null;
+
+const positionWithinElement = (x, y, el) => {
+  const { type, shape, x1, x2, y1, y2 } = el;
   if (type === "shape") {
     switch (shape) {
       case "line":
-        const on = onLine(x1, y1, x2, y2, x, y);
-        const start = nearPoint(x, y, x1, y1, "start");
-        const end = nearPoint(x, y, x2, y2, "end");
-        return start || end || on;
+        return nearPoint(x, y, x1, y1, "start") || nearPoint(x, y, x2, y2, "end") || onLine(x1, y1, x2, y2, x, y);
       case "rectangle":
-        const topLeft = nearPoint(x, y, x1, y1, "tl");
-        const topRight = nearPoint(x, y, x2, y1, "tr");
-        const bottomLeft = nearPoint(x, y, x1, y2, "bl");
-        const bottomRight = nearPoint(x, y, x2, y2, "br");
-        const inside =
-          x >= x1 && x <= x2 && y >= y1 && y <= y2 ? "inside" : null;
-        return topLeft || topRight || bottomLeft || bottomRight || inside;
-      case "circle":
-        const center = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
-        const radius = distance(center, { x: x1, y: y1 });
-        const insideC = distance(center, { x, y }) < radius ? "inside" : null;
-        return insideC;
-      case "triangle":
-        const top = { x: (x1 + x2) / 2, y: y1 };
-        const left = { x: x1, y: y2 };
-        const right = { x: x2, y: y2 };
-        const insideT =
-          onLine(top.x, top.y, left.x, left.y, x, y, 5) ||
-          onLine(top.x, top.y, right.x, right.y, x, y, 5) ||
-          onLine(left.x, left.y, right.x, right.y, x, y, 5)
-            ? "inside"
-            : null;
-        return insideT;
-      default:
-        throw new Error(`Type not recognised: ${type}`);
-    }
-  } else if (type === "pen") {
-    const betweenAnyPoint = element.points.some((point, index) => {
-      const nextPoint = element.points[index + 1];
-      if (!nextPoint) return false;
-      return (
-        onLine(point.x, point.y, nextPoint.x, nextPoint.y, x, y, 5) != null
-      );
-    });
-    return betweenAnyPoint ? "inside" : null;
-  }
-};
-
-const distance = (a, b) =>
-  Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
-
-const getElementAtPosition = (x, y, elements) => {
-  return elements
-    .map((element) => ({
-      ...element,
-      position: positionWithinElement(x, y, element),
-    }))
-    .find((element) => element.position !== null);
-};
-
-const adjustElementCoordinates = (element) => {
-  const { type, shape, x1, y1, x2, y2 } = element;
-  if (type === "shape") {
-    if (shape === "line") {
-      if (x1 < x2 || (x1 === x2 && y1 < y2)) {
-        return { x1, y1, x2, y2 };
-      } else {
-        return { x1: x2, y1: y2, x2: x1, y2: y1 };
+        return (
+          nearPoint(x, y, x1, y1, "tl") || nearPoint(x, y, x2, y1, "tr") ||
+          nearPoint(x, y, x1, y2, "bl") || nearPoint(x, y, x2, y2, "br") ||
+          (x >= x1 && x <= x2 && y >= y1 && y <= y2 ? "inside" : null)
+        );
+      case "circle": {
+        const c = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
+        return dist(c, { x, y }) < dist(c, { x: x1, y: y1 }) ? "inside" : null;
       }
-    } else if (shape === "rectangle") {
-      const minX = Math.min(x1, x2);
-      const minY = Math.min(y1, y2);
-      const maxX = Math.max(x1, x2);
-      const maxY = Math.max(y1, y2);
-      return { x1: minX, y1: minY, x2: maxX, y2: maxY };
-    } else if (shape === "circle") {
-      // adjust circle to fit in a rectangle
-      const minX = Math.min(x1, x2);
-      const minY = Math.min(y1, y2);
-      const maxX = Math.max(x1, x2);
-      const maxY = Math.max(y1, y2);
-      const dx = maxX - minX;
-      const dy = maxY - minY;
-      const d = Math.min(dx, dy);
-      return {
-        x1: minX,
-        y1: minY,
-        x2: minX + d,
-        y2: minY + d,
-      };
-    } else if (shape === "triangle") {
-      const minX = Math.min(x1, x2);
-      const minY = Math.min(y1, y2);
-      const maxX = Math.max(x1, x2);
-      const maxY = Math.max(y1, y2);
-      return { x1: minX, y1: minY, x2: maxX, y2: maxY };
+      case "triangle": {
+        const top = { x: (x1 + x2) / 2, y: y1 }, left = { x: x1, y: y2 }, right = { x: x2, y: y2 };
+        return (onLine(top.x, top.y, left.x, left.y, x, y, 5) ||
+                onLine(top.x, top.y, right.x, right.y, x, y, 5) ||
+                onLine(left.x, left.y, right.x, right.y, x, y, 5)) ? "inside" : null;
+      }
+      default: return null;
     }
   }
-};
-
-const cursorForPosition = (position) => {
-  switch (position) {
-    case "tl":
-    case "br":
-    case "start":
-    case "end":
-      return "nwse-resize";
-    case "tr":
-    case "bl":
-      return "nesw-resize";
-    default:
-      return "move";
+  if (type === "pen") {
+    return el.points.some((p, i) => {
+      const next = el.points[i + 1];
+      return next ? onLine(p.x, p.y, next.x, next.y, x, y, 5) : false;
+    }) ? "inside" : null;
   }
 };
 
-const resizedCoordinates = (clientX, clientY, position, coordinates) => {
-  const { x1, y1, x2, y2 } = coordinates;
-  switch (position) {
-    case "tl":
-    case "start":
-      return { x1: clientX, y1: clientY, x2, y2 };
-    case "tr":
-      return { x1, y1: clientY, x2: clientX, y2 };
-    case "bl":
-      return { x1: clientX, y1, x2, y2: clientY };
-    case "br":
-    case "end":
-      return { x1, y1, x2: clientX, y2: clientY };
-    default:
-      return null;
-  }
+const getElementAtPosition = (x, y, elements) =>
+  elements.map((e) => ({ ...e, position: positionWithinElement(x, y, e) }))
+          .find((e) => e.position !== null);
+
+const adjustCoords = (el) => {
+  const { x1, y1, x2, y2, shape } = el;
+  const [minX, minY, maxX, maxY] = [Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)];
+  if (shape === "line") return x1 < x2 || (x1 === x2 && y1 < y2) ? { x1, y1, x2, y2 } : { x1: x2, y1: y2, x2: x1, y2: y1 };
+  return { x1: minX, y1: minY, x2: maxX, y2: maxY };
 };
 
-const getSvgPathFromStroke = (stroke) => {
+const cursorForPosition = (pos) =>
+  ({ tl: "nwse-resize", br: "nwse-resize", start: "nwse-resize", end: "nwse-resize", tr: "nesw-resize", bl: "nesw-resize" }[pos] ?? "move");
+
+const resizedCoords = (cx, cy, pos, { x1, y1, x2, y2 }) => ({
+  tl: { x1: cx, y1: cy, x2, y2 }, start: { x1: cx, y1: cy, x2, y2 },
+  tr: { x1, y1: cy, x2: cx, y2 },
+  bl: { x1: cx, y1, x2, y2: cy },
+  br: { x1, y1, x2: cx, y2: cy }, end: { x1, y1, x2: cx, y2: cy },
+}[pos] ?? null);
+
+const getSvgPath = (stroke) => {
   if (!stroke.length) return "";
-
-  const d = stroke.reduce(
-    (acc, [x0, y0], i, arr) => {
-      const [x1, y1] = arr[(i + 1) % arr.length];
-      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
-      return acc;
-    },
-    ["M", ...stroke[0], "Q"]
-  );
-
-  d.push("Z");
-  return d.join(" ");
+  const d = stroke.reduce((acc, [x0, y0], i, arr) => {
+    const [x1, y1] = arr[(i + 1) % arr.length];
+    acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+    return acc;
+  }, ["M", ...stroke[0], "Q"]);
+  return [...d, "Z"].join(" ");
 };
 
-const drawElement = (roughCanvas, ctx, element) => {
-  switch (element.type) {
-    case "shape":
-      if (element.roughElement) {
-        roughCanvas.draw(element.roughElement);
-      } else {
-        console.warn("roughElement is undefined for the shape");
-      }
-      break;
-    case "pen":
-      if (element.points && element.points.length > 0) {
-        const stroke = getStroke(element.points, { size: element.strokeWidth });
-        const path = getSvgPathFromStroke(stroke);
-        ctx.strokeStyle = element.stroke || "black";
-        ctx.lineWidth = element.strokeWidth || 1;
-        ctx.stroke(new Path2D(path));
-      } else {
-        console.warn("No points found for the pen");
-      }
-      break;
-    default:
-      console.warn(`Type not recognised: ${element.type}`);
+const drawElement = (rc, ctx, el) => {
+  if (el.type === "shape" && el.roughElement) {
+    ctx.save();
+    ctx.globalAlpha = el.opacity ?? 1;
+    rc.draw(el.roughElement);
+    ctx.restore();
+  } else if (el.type === "pen" && el.points?.length) {
+    const path = getSvgPath(getStroke(el.points, { size: el.strokeWidth || 4 }));
+    ctx.fillStyle = toRgba(el.stroke || "#000000", el.opacity ?? 1);
+    ctx.fill(new Path2D(path));
   }
 };
 
-const adjustmentRequired = (type) => ["shape"].includes(type);
-
-const Paint = () => {
+// ─── Component ───────────────────────────────────────────────────────────────
+const Paint = ({ onClose }) => {
   const {
-    currentImage,
-    getImageParameters,
-    mergeDrawingWithImage,
-    elements,
-    setElements,
-    dimensions,
-    undoE,
-    redoE,
+    currentImage, mergeDrawingWithImage, imageRef,
+    elements, setElements, undoE, redoE,
   } = useContext(ImageContext);
+
   const canvasRef = useRef(null);
-  const [action, setAction] = useState("none");
-  const [lineWidth, setLineWidth] = useState(2);
-  const [color, setColor] = useState("black");
+  const [canvasHost, setCanvasHost] = useState(null);
+  const [action, setAction]               = useState("none");
+  const [tool,   setTool]                 = useState("pen");
+  const [shape,  setShape]                = useState("rectangle");
+  const [color,  setColor]                = useState("#ffffff");
+  const [lineWidth, setLineWidth]         = useState(4);
+  const [opacity, setOpacity]             = useState(100);
+  const [selectedElement, setSelectedEl] = useState(null);
 
-  const [tool, setTool] = useState("shape");
-  const [selectedElement, setSelectedElement] = useState(null);
-  const [shape, setShape] = useState("rectangle");
-
-  const menuTool = [
-    { id: "pen", name: "Bút", icon: <FaPaintBrush /> },
-    { id: "shape", name: "Tạo hình", icon: <IoShapesOutline /> },
-    { id: "eraser", name: "Bút xóa", icon: <FaEraser /> },
-    { id: "selection", name: "Chọn", icon: <FaMousePointer /> },
+  const TOOLS  = [
+    { id: "pen",       label: "Bút vẽ", icon: <FaPaintBrush />, shortcut: "B" },
+    { id: "shape",     label: "Hình",   icon: <IoShapesOutline />, shortcut: "H" },
+    { id: "eraser",    label: "Tẩy",    icon: <FaEraser />, shortcut: "E" },
+    { id: "selection", label: "Chọn",   icon: <FaMousePointer />, shortcut: "V" },
   ];
-
-  const menuShape = [
-    { id: "rectangle", name: "Hình chữ nhật", icon: <RiRectangleLine /> },
-    { id: "circle", name: "Hình tròn", icon: <RiCircleLine /> },
-    { id: "triangle", name: "Hình tam giác", icon: <RiTriangleLine /> },
-    { id: "line", name: "Đường thẳng", icon: <GiStraightPipe /> },
+  const SHAPES = [
+    { id: "rectangle", label: "Chữ nhật", icon: <RiRectangleLine />, shortcut: "1" },
+    { id: "circle",    label: "Tròn", icon: <RiCircleLine />, shortcut: "2" },
+    { id: "triangle",  label: "Tam giác", icon: <RiTriangleLine />, shortcut: "3" },
+    { id: "line",      label: "Đường thẳng", icon: <GiStraightPipe />, shortcut: "4" },
   ];
+  const brushPresets = [2, 4, 8, 14, 24, 36];
+
+  useEffect(() => {
+    const resolveHost = () => {
+      const host = document.querySelector(".image-editor-shell .ie-image-viewport");
+      setCanvasHost(host);
+    };
+    resolveHost();
+    const observer = new MutationObserver(resolveHost);
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("resize", resolveHost);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", resolveHost);
+    };
+  }, [currentImage]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!currentImage) return;
+
+      const target = e.target;
+      const isEditable =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable;
+      if (isEditable) return;
+
+      const isCmd = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+
+      if (isCmd && k === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redoE();
+        else undoE();
+        return;
+      }
+      if (isCmd && k === "y") {
+        e.preventDefault();
+        redoE();
+        return;
+      }
+
+      if (k === "escape") {
+        e.preventDefault();
+        setAction("none");
+        setSelectedEl(null);
+        return;
+      }
+
+      if (k === "[") {
+        e.preventDefault();
+        setLineWidth((v) => clamp(v - 1, BRUSH_MIN, BRUSH_MAX));
+        return;
+      }
+      if (k === "]") {
+        e.preventDefault();
+        setLineWidth((v) => clamp(v + 1, BRUSH_MIN, BRUSH_MAX));
+        return;
+      }
+
+      if (k === "b") setTool("pen");
+      else if (k === "h") setTool("shape");
+      else if (k === "e") setTool("eraser");
+      else if (k === "v") setTool("selection");
+      else if (k === "1") setShape("rectangle");
+      else if (k === "2") setShape("circle");
+      else if (k === "3") setShape("triangle");
+      else if (k === "4") setShape("line");
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentImage, undoE, redoE]);
+
+  const updateCanvasGeometry = useCallback(() => {
+    const canvas = canvasRef.current;
+    const imgEl = imageRef?.current;
+    const hostEl = canvas?.parentElement;
+    if (!canvas || !imgEl || !hostEl || !currentImage) return false;
+
+    const imgRect = imgEl.getBoundingClientRect();
+    const hostRect = hostEl.getBoundingClientRect();
+    const width = Math.max(1, Math.round(imgRect.width));
+    const height = Math.max(1, Math.round(imgRect.height));
+    const left = imgRect.left - hostRect.left;
+    const top = imgRect.top - hostRect.top;
+
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    canvas.style.left = `${left}px`;
+    canvas.style.top = `${top}px`;
+    return true;
+  }, [currentImage, imageRef]);
+
+  // ── Draw loop ───────────────────────────────────────────────────────────────
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (!updateCanvasGeometry()) return;
+
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    // Kiểm tra nếu getImageParameters hoặc dimensions không tồn tại
-    const imageParams = getImageParameters();
-    if (!imageParams || !dimensions) {
-      return; // Thoát ra nếu chưa có hình ảnh hoặc kích thước chưa xác định
-    }
+    canvas.style.cursor = tool === "eraser" ? "crosshair" : "default";
 
-    const { top, left, width, height } = imageParams;
-
-    // Set canvas dimensions and styles before drawing
-    canvas.style.position = "absolute";
-    canvas.style.top = `${top}px`;
-    const offset = (22 * 16 * 15) / 100;
-    canvas.style.left = `${left - offset}px`;
-
-    console.log("size for image ", width, height);
-    console.log("size for canvas ", dimensions.width, dimensions.height);
-
-    // Giới hạn kích thước của canvas để không vượt quá kích thước màn hình
-    canvas.width = Math.min(width, dimensions.width);
-    canvas.height = Math.min(height, dimensions.height);
-    canvas.style.zIndex = 10; // Ensure canvas is on top of the image
-
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const rc = rough.canvas(canvas);
+    elements.forEach((el) => drawElement(rc, ctx, el));
 
-    // Now proceed to draw
-    const roughCanvas = rough.canvas(canvas);
-
-    // Draw elements
-    elements.forEach((element) => drawElement(roughCanvas, ctx, element));
-
-    // Draw the bounding box if an element is selected
-    if (selectedElement && selectedElement.type === "shape") {
+    // Selection box
+    if (selectedElement?.type === "shape") {
+      const { x1, y1, x2, y2 } = adjustCoords(selectedElement);
+      const pad = 5;
       ctx.save();
-      ctx.strokeStyle = "white"; // Chọn màu viền rõ ràng
-      ctx.lineWidth = 1;
-      ctx.setLineDash([5, 3]); // Đường gạch ngang cho border
-
-      // Điều chỉnh toạ độ để đường bao nằm bên ngoài element
-      const padding = 5; // Độ giãn khoảng cách của viền bao ngoài
-      const { x1, y1, x2, y2 } = adjustElementCoordinates(selectedElement);
-      const minX = Math.min(x1, x2) - padding; // Di chuyển viền ra ngoài
-      const minY = Math.min(y1, y2) - padding; // Di chuyển viền ra ngoài
-      const boxWidth = Math.abs(x2 - x1) + padding * 2; // Tăng chiều rộng
-      const boxHeight = Math.abs(y2 - y1) + padding * 2; // Tăng chiều cao
-
-      // Vẽ hình chữ nhật bao quanh phần tử
-      ctx.strokeRect(minX, minY, boxWidth, boxHeight);
+      ctx.strokeStyle = "#00aaff";
+      ctx.lineWidth   = 1.5;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeRect(x1 - pad, y1 - pad, (x2 - x1) + pad * 2, (y2 - y1) + pad * 2);
       ctx.restore();
     }
-  }, [elements, getImageParameters, currentImage, selectedElement, dimensions]);
+  }, [elements, currentImage, selectedElement, tool, imageRef, updateCanvasGeometry]);
 
-  const updateElement = (id, x1, y1, x2, y2, type, shape) => {
-    const elementsCopy = [...elements];
-    switch (type) {
-      case "shape":
-        elementsCopy[id] = createElement(id, x1, y1, x2, y2, type, shape, {
-          stroke: color,
-          strokeWidth: lineWidth,
+  useEffect(() => {
+    if (!currentImage) return undefined;
+    let rafId = 0;
+    const loop = () => {
+      updateCanvasGeometry();
+      rafId = requestAnimationFrame(loop);
+    };
+    rafId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafId);
+  }, [currentImage, canvasHost, imageRef, updateCanvasGeometry]);
+
+  // ── Update element ──────────────────────────────────────────────────────────
+  const updateElement = (id, x1, y1, x2, y2, type, shapeType) => {
+    setElements((prev) => {
+      const copy = [...prev];
+      const existing = copy[id];
+      if (!existing) return copy;
+
+      if (type === "shape") {
+        const resolvedShape = shapeType || existing.shape || "rectangle";
+        copy[id] = createElement(id, x1, y1, x2, y2, type, resolvedShape, {
+          stroke: existing.stroke || color,
+          strokeWidth: existing.strokeWidth || lineWidth,
+          opacity: existing.opacity ?? opacity / 100,
         });
-        break;
-      case "pen":
-        elementsCopy[id].points = [
-          ...elementsCopy[id].points,
-          { x: x2, y: y2 },
-        ];
-        break;
-      default:
-        throw new Error(`Type not recognised: ${type}`);
-    }
-    setElements(elementsCopy, true);
+      } else if (type === "pen") {
+        copy[id] = { ...existing, points: [...existing.points, { x: x2, y: y2 }] };
+      }
+      return copy;
+    }, true);
+  };
+
+  // ── Mouse handlers ──────────────────────────────────────────────────────────
+  const getCanvasCoords = (e) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
   const handleMouseDown = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const clientX = e.clientX - rect.left;
-    const clientY = e.clientY - rect.top;
+    e.preventDefault();
+    if (!currentImage) return;
+    if (typeof e.pointerId === "number" && e.currentTarget?.setPointerCapture) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    const { x: cx, y: cy } = getCanvasCoords(e);
 
     if (tool === "selection") {
-      const element = getElementAtPosition(clientX, clientY, elements);
-      if (element) {
-        if (element.type === "pen") {
-          const xOffsets = element.points.map((point) => clientX - point.x);
-          const yOffsets = element.points.map((point) => clientY - point.y);
-          setSelectedElement({ ...element, xOffsets, yOffsets });
-          setTimeout(() => {
-            setAction("moving");
-          }, 0);
-        } else if (element.position === "inside") {
-          const offsetX = clientX - element.x1;
-          const offsetY = clientY - element.y1;
-          const width = element.x2 - element.x1;
-          const height = element.y2 - element.y1;
-
-          // Cập nhật màu và độ dày trước khi cho phép di chuyển
-          setSelectedElement({ ...element, offsetX, offsetY, width, height });
-          setShape(element.shape);
-          setColor(element.roughElement.options.stroke);
-          setLineWidth(element.roughElement.options.strokeWidth);
-          setElements((prevState) => prevState);
-
-          setTimeout(() => {
-            setAction("moving");
-          }, 0);
+      const el = getElementAtPosition(cx, cy, elements);
+      if (el) {
+        if (el.type === "pen") {
+          setSelectedEl({ ...el, xOffsets: el.points.map((p) => cx - p.x), yOffsets: el.points.map((p) => cy - p.y) });
+        } else if (el.position === "inside") {
+          setSelectedEl({ ...el, offsetX: cx - el.x1, offsetY: cy - el.y1, width: el.x2 - el.x1, height: el.y2 - el.y1 });
         } else {
-          const { id, x1, y1, x2, y2, type, shape } = element;
-          const position = element.position;
-          const offsetX = clientX - x1;
-          const offsetY = clientY - y1;
-
-          setSelectedElement({
-            id,
-            x1,
-            y1,
-            x2,
-            y2,
-            type,
-            shape,
-            position,
-            offsetX,
-            offsetY,
-          });
+          setSelectedEl({ ...el, position: el.position, offsetX: cx - el.x1, offsetY: cy - el.y1 });
           setAction("resizing");
+          return;
         }
+        setAction("moving");
       }
-    } else if (tool === "shape" || tool === "pen") {
-      setAction("drawing");
+      return;
+    }
 
+    if (tool === "eraser") {
+      const el = getElementAtPosition(cx, cy, elements);
+      if (el) {
+        const copy = elements.filter((e) => e.id !== el.id).map((e, i) => ({ ...e, id: i }));
+        setElements(copy);
+      }
+      return;
+    }
+
+    if (tool === "shape" || tool === "pen") {
       const id = elements.length;
-      const newElement = createElement(
-        id,
-        clientX,
-        clientY,
-        clientX,
-        clientY,
-        tool,
-        shape, // Truyền shape vào
-        {
-          stroke: color,
-          strokeWidth: lineWidth,
-        }
-      );
-      setElements((prevState) => [...prevState, newElement]);
-      setSelectedElement(newElement);
+      const newEl = createElement(id, cx, cy, cx, cy, tool, shape, {
+        stroke: color,
+        strokeWidth: lineWidth,
+        opacity: opacity / 100,
+      });
+      if (!newEl) return;
+      setElements((prev) => [...prev, newEl]);
+      setSelectedEl(newEl);
+      setAction("drawing");
     }
-  };
-
-  const handleMouseUp = () => {
-    if (selectedElement) {
-      const index = selectedElement.id;
-      const { id, type } = elements[index];
-      if (
-        (action === "drawing" || action === "resizing") &&
-        adjustmentRequired(type)
-      ) {
-        const { x1, y1, x2, y2 } = adjustElementCoordinates(elements[index]);
-        updateElement(id, x1, y1, x2, y2, type, shape);
-      }
-    }
-    setTool("selection");
-    setAction("none");
-    setSelectedElement(null);
   };
 
   const handleMouseMove = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const currentX = e.clientX - rect.left;
-    const currentY = e.clientY - rect.top;
-
+    const { x: cx, y: cy } = getCanvasCoords(e);
     if (tool === "selection") {
-      const element = getElementAtPosition(currentX, currentY, elements);
-      e.target.style.cursor = element
-        ? cursorForPosition(element.position)
-        : "default";
+      const el = getElementAtPosition(cx, cy, elements);
+      canvasRef.current.style.cursor = el ? cursorForPosition(el.position) : "default";
     }
-
     if (action === "drawing") {
-      const index = elements.length - 1;
-      const { x1, y1 } = elements[index];
-      updateElement(index, x1, y1, currentX, currentY, tool, shape); // Truyền shape vào
+      const idx = elements.length - 1;
+      if (idx < 0 || !elements[idx]) return;
+      updateElement(idx, elements[idx].x1, elements[idx].y1, cx, cy, tool, elements[idx].shape || shape);
     } else if (action === "moving" && selectedElement) {
       if (selectedElement.type === "pen") {
-        const newPoints = selectedElement.points.map((_, index) => ({
-          x: currentX - selectedElement.xOffsets[index],
-          y: currentY - selectedElement.yOffsets[index],
+        const pts = selectedElement.points.map((_, i) => ({
+          x: cx - selectedElement.xOffsets[i], y: cy - selectedElement.yOffsets[i],
         }));
-        const elementsCopy = [...elements];
-        elementsCopy[selectedElement.id].points = newPoints;
-        setElements(elementsCopy, true);
+        const copy = [...elements];
+        copy[selectedElement.id].points = pts;
+        setElements(copy, true);
       } else {
-        const { id, type, offsetX, offsetY, width, height } = selectedElement;
-
-        const nextX1 = currentX - offsetX;
-        const nextY1 = currentY - offsetY;
-        const nextX2 = nextX1 + width;
-        const nextY2 = nextY1 + height;
-
-        updateElement(id, nextX1, nextY1, nextX2, nextY2, type, shape); // Truyền shape vào
+        const { id, type, offsetX, offsetY, width, height, shape: selectedShape } = selectedElement;
+        updateElement(id, cx - offsetX, cy - offsetY, cx - offsetX + width, cy - offsetY + height, type, selectedShape);
       }
-    } else if (action === "resizing" && selectedElement.type === "shape") {
-      const { id, type, position, ...coordinates } = selectedElement;
-      const { x1, y1, x2, y2 } = resizedCoordinates(
-        currentX,
-        currentY,
-        position,
-        coordinates
-      );
-      updateElement(id, x1, y1, x2, y2, type, shape); // Truyền shape vào
+    } else if (action === "resizing" && selectedElement) {
+      const { id, type, position, shape: selectedShape, ...coords } = selectedElement;
+      const r = resizedCoords(cx, cy, position, coords);
+      if (r) updateElement(id, r.x1, r.y1, r.x2, r.y2, type, selectedShape);
     }
+  };
+
+  const handleMouseUp = (e) => {
+    if (typeof e?.pointerId === "number" && e.currentTarget?.releasePointerCapture) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        // no-op
+      }
+    }
+    if (selectedElement && (action === "drawing" || action === "resizing") && selectedElement.type === "shape") {
+      const idx = selectedElement.id;
+      if (!elements[idx]) {
+        setAction("none");
+        setSelectedEl(null);
+        return;
+      }
+      const { x1, y1, x2, y2 } = adjustCoords(elements[idx]);
+      updateElement(idx, x1, y1, x2, y2, selectedElement.type, selectedElement.shape);
+    }
+    // Do NOT reset tool here – user should keep drawing with same tool
+    setAction("none");
+    setSelectedEl(null);
   };
 
   const handleMerge = () => {
-    const canvasOverlay = canvasRef.current;
-    const imageParams = getImageParameters();
-    if (!imageParams) {
-      console.error("Không lấy được thông số hình ảnh");
-      return;
-    }
-    const { width, height } = imageParams;
-
-    // Create a new canvas to merge
-    const canvasMerge = document.createElement("canvas");
-    canvasMerge.width = width;
-    canvasMerge.height = height;
-    const ctxMerge = canvasMerge.getContext("2d");
-
-    // Create an Image object for the original image
-    const image = new Image();
-    image.src = currentImage;
-
-    image.onload = () => {
-      // Draw the original image onto canvasMerge
-      ctxMerge.drawImage(image, 0, 0, width, height);
-
-      // Draw the overlay canvas onto canvasMerge
-      ctxMerge.drawImage(canvasOverlay, 0, 0, width, height);
-
-      // Get the data URL from canvasMerge
-      const mergedImageUrl = canvasMerge.toDataURL("image/jpeg");
-
-      // Update the current image in context
-      mergeDrawingWithImage(mergedImageUrl);
-
-      // Clear the overlay canvas
-      setElements([]);
-    };
-  };
-
-  const handleChangeColor = (e) => {
-    if (selectedElement) {
-      const { id, type, shape } = selectedElement;
-      const updatedElement = createElement(
-        id,
-        selectedElement.x1,
-        selectedElement.y1,
-        selectedElement.x2,
-        selectedElement.y2,
-        type,
-        shape, // Truyền shape vào
-        {
-          stroke: e.target.value,
-          strokeWidth: lineWidth,
-        }
+    if (!currentImage || !canvasRef.current) return;
+    const merge = document.createElement("canvas");
+    const ctx = merge.getContext("2d");
+    if (!ctx) return;
+    const img = new Image();
+    img.onload = () => {
+      const naturalW = img.naturalWidth || img.width;
+      const naturalH = img.naturalHeight || img.height;
+      merge.width = naturalW;
+      merge.height = naturalH;
+      ctx.drawImage(img, 0, 0, naturalW, naturalH);
+      ctx.drawImage(
+        canvasRef.current,
+        0,
+        0,
+        canvasRef.current.width,
+        canvasRef.current.height,
+        0,
+        0,
+        naturalW,
+        naturalH
       );
-      const elementsCopy = [...elements];
-      elementsCopy[id] = updatedElement;
-      setElements(elementsCopy);
-    }
-    setColor(e.target.value);
+      mergeDrawingWithImage(merge.toDataURL("image/png"));
+      setElements([]);
+      onClose?.();
+    };
+    img.src = currentImage;
   };
 
-  const handleChangeLineWidth = (e) => {
-    const newLineWidth = e.target.value;
+  const handleClear = () => setElements([]);
 
-    if (selectedElement) {
-      const { id, type } = selectedElement;
-
-      // Nếu là phần tử 'pen'
-      if (type === "pen") {
-        const elementsCopy = [...elements];
-        elementsCopy[id].strokeWidth = newLineWidth;
-        setElements(elementsCopy);
-      } else if (type === "shape") {
-        // Nếu là phần tử 'shape'
-        const updatedElement = createElement(
-          id,
-          selectedElement.x1,
-          selectedElement.y1,
-          selectedElement.x2,
-          selectedElement.y2,
-          type,
-          selectedElement.shape, // Truyền shape vào
-          {
-            stroke: color,
-            strokeWidth: newLineWidth,
-          }
-        );
-        const elementsCopy = [...elements];
-        elementsCopy[id] = updatedElement;
-        setElements(elementsCopy);
-      }
-    }
-
-    setLineWidth(newLineWidth);
+  const handleCancel = () => {
+    setElements([]);
+    onClose?.();
   };
 
-  const handleClick = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const clientX = e.clientX - rect.left;
-    const clientY = e.clientY - rect.top;
-
-    // Tìm phần tử tại vị trí click
-    const element = getElementAtPosition(clientX, clientY, elements);
-
-    // Nếu phần tử đã được chọn và bạn click vào chính nó thì không làm gì cả
-    if (element && selectedElement && element.id === selectedElement.id) {
-      return; // Không làm gì nếu phần tử đang được chọn lại
-    }
-
-    if (element && element.type === "shape") {
-      // Nếu có phần tử được chọn, vẽ border và lưu vào state
-      setSelectedElement(element);
-      setShape(element.shape); // Cập nhật shape
-      setColor(element.roughElement.options.stroke);
-      setLineWidth(element.roughElement.options.strokeWidth);
-    } else {
-      // Nếu click ra ngoài, bỏ chọn phần tử
-      setSelectedElement(null);
-    }
-  };
+  const currentToolLabel = TOOLS.find((t) => t.id === tool)?.label || "Bút vẽ";
 
   return (
     <>
-      {/* Canvas overlaying the image */}
-      <canvas
-        ref={canvasRef}
-        style={{ position: "absolute", top: 0, left: 0 }}
-        onClick={handleClick} // Sử dụng onClick để chọn hoặc bỏ chọn phần tử
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onMouseMove={handleMouseMove}
-      ></canvas>
+      {/* Overlay canvas rendered inside image viewport */}
+      {canvasHost &&
+        createPortal(
+          <canvas
+            ref={canvasRef}
+            className="ie-paint-layer"
+            onPointerDown={handleMouseDown}
+            onPointerMove={handleMouseMove}
+            onPointerUp={handleMouseUp}
+            onPointerLeave={handleMouseUp}
+          />,
+          canvasHost
+        )}
 
-      <section id="paint" className="tool-drawer">
-        <div className="tool-name" style={{ justifyContent: "center" }}>
-          <div></div>
-          Vẽ
+      {/* Sidebar panel */}
+      <section className="tool-drawer ie-paint-panel">
+        <div className="tool-name">
+          <div className="ie-paint-title-block">
+            <span>Vẽ</span>
+            <small>Layer vector thời gian thực</small>
+          </div>
+          <button type="button" onClick={handleCancel} className="icon-cancel"><FaTimes /></button>
         </div>
-        <div className="splitter"></div>
+        <div className="splitter" />
+        <div className="ie-paint-status">
+          <span>{currentToolLabel}</span>
+          <span>{elements.length} nét</span>
+        </div>
 
-        <div id="crop-content" className="tool-content">
-          <div className="tool-detail">
-            <div className="group group1">
-              <span>Công cụ</span>
-              <div className="grid__tool">
-                {menuTool.map((item) => (
-                  <div
-                    className={`box__tool ${
-                      tool === item.id ? "box__tool--active" : ""
-                    }`}
-                    onClick={() => setTool(item.id)}
-                  >
-                    {item.icon}
-                  </div>
-                ))}
-              </div>
+        {!currentImage && (
+          <p className="ie-empty-message">Chưa có ảnh để vẽ.</p>
+        )}
+
+        <div className="tool-content">
+          <div className="group">
+            <span>Công cụ</span>
+            <div className="ie-paint-tools">
+              {TOOLS.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`ie-paint-tool-btn ${tool === t.id ? "active" : ""}`}
+                  onClick={() => setTool(t.id)}
+                  title={`${t.label} (${t.shortcut})`}
+                  disabled={!currentImage}
+                >
+                  <span className="ie-paint-tool-icon">{t.icon}</span>
+                  <span>{t.label}</span>
+                  <kbd>{t.shortcut}</kbd>
+                </button>
+              ))}
             </div>
           </div>
         </div>
-        <div id="crop-content" className="tool-content">
-          <div className="tool-detail">
-            <div className="group group1">
-              <span>Màu</span>
-              <div className="box__color">
-                <input
-                  type="color"
-                  value={color}
-                  onChange={handleChangeColor}
-                  className="input__color"
-                />
-                <FaAngleDown />
-              </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginTop: 10,
-                }}
-              >
+        <div className="tool-content">
+          <div className="group">
+            <span>Màu nét</span>
+            <div className="ie-paint-color-row">
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                className="ie-paint-color-input"
+                disabled={!currentImage}
+              />
+              <div className="ie-color-code">{color.toUpperCase()}</div>
+            </div>
+
+            <div className="ie-paint-swatch-grid">
+              {COLOR_PRESETS.map((hex) => (
+                <button
+                  key={hex}
+                  type="button"
+                  className={`ie-paint-swatch ${color.toLowerCase() === hex.toLowerCase() ? "active" : ""}`}
+                  style={{ background: hex }}
+                  onClick={() => setColor(hex)}
+                  title={hex}
+                  disabled={!currentImage}
+                />
+              ))}
+            </div>
+
+            <div className="ie-paint-control-row">
+              <div className="ie-paint-slider-head">
                 <label>Độ dày</label>
-                <label>{lineWidth}</label>
+                <strong>{lineWidth}px</strong>
               </div>
-              {/* input type range */}
               <input
                 type="range"
-                min="1"
-                max="50"
+                min={BRUSH_MIN}
+                max={BRUSH_MAX}
                 value={lineWidth}
-                onChange={handleChangeLineWidth}
-                style={{ border: "none", outline: "none", width: "100%" }}
+                onChange={(e) => setLineWidth(clamp(Number(e.target.value), BRUSH_MIN, BRUSH_MAX))}
+                disabled={!currentImage}
+              />
+            </div>
+
+            <div className="ie-paint-presets">
+              {brushPresets.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  className={`btn ${lineWidth === size ? "btn--active" : ""}`}
+                  onClick={() => setLineWidth(size)}
+                  disabled={!currentImage}
+                >
+                  {size}px
+                </button>
+              ))}
+            </div>
+
+            <div className="ie-paint-control-row">
+              <div className="ie-paint-slider-head">
+                <label>Độ mờ</label>
+                <strong>{opacity}%</strong>
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                step="5"
+                value={opacity}
+                onChange={(e) => setOpacity(clamp(Number(e.target.value), 10, 100))}
+                disabled={!currentImage}
+              />
+            </div>
+
+            <div className="ie-paint-preview">
+              <span
+                style={{
+                  width: `${Math.max(4, Math.min(lineWidth * 1.8, 80))}px`,
+                  height: `${Math.max(4, Math.min(lineWidth * 1.8, 80))}px`,
+                  background: toRgba(color, opacity / 100),
+                }}
               />
             </div>
           </div>
         </div>
+
         {tool === "shape" && (
-          <div id="crop-content" className="tool-content">
-            <div className="tool-detail">
-              <div className="group group1">
-                <span>Khối</span>
-                <div className="grid__tool">
-                  {menuShape.map((item) => (
-                    <div
-                      className={`box__tool ${
-                        shape === item.id ? "box__tool--active" : ""
-                      }`}
-                      onClick={() => setShape(item.id)}
-                    >
-                      {item.icon}
-                    </div>
-                  ))}
-                </div>
+          <div className="tool-content">
+            <div className="group">
+              <span>Khối hình</span>
+              <div className="ie-paint-shape-grid">
+                {SHAPES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={`ie-paint-shape-btn ${shape === s.id ? "active" : ""}`}
+                    onClick={() => setShape(s.id)}
+                    title={`${s.label} (${s.shortcut})`}
+                    disabled={!currentImage}
+                  >
+                    {s.icon}
+                    <span>{s.label}</span>
+                    <kbd>{s.shortcut}</kbd>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
         )}
-        {/*   
-  <div className="undo-redo-section">
-        <button className="toolbar-button" onClick={undoE} >
-          <span className="zoom-text">HOÀN TÁC</span>
-          <i className="fas fa-undo icon-custom"></i>
-        </button>
-        <button className="toolbar-button" onClick={redoE} >
-          <i className="fas fa-redo icon-custom"></i>
-          <span className="zoom-text">HOÀN LẠI</span>
-        </button>
-      </div> */}
+
+        <div className="tool-content">
+          <div className="group">
+            <span>Thao tác nhanh</span>
+            <div className="ie-paint-action-row">
+              <button type="button" className="btn" onClick={undoE} disabled={!currentImage}>↩ Hoàn tác</button>
+              <button type="button" className="btn" onClick={redoE} disabled={!currentImage}>↪ Làm lại</button>
+              <button type="button" className="btn" onClick={handleClear} title="Xóa toàn bộ" disabled={!currentImage}>🗑 Xóa</button>
+            </div>
+            <p className="ie-paint-shortcuts">
+              Phím tắt: <kbd>B</kbd> Bút, <kbd>H</kbd> Hình, <kbd>E</kbd> Tẩy, <kbd>V</kbd> Chọn,
+              <kbd> [ </kbd>/<kbd> ] </kbd> đổi nét, <kbd>Ctrl/Cmd + Z</kbd> hoàn tác.
+            </p>
+          </div>
+        </div>
+
         <div className="bottom-content">
           <div className="action-btn">
-            <button id="crop-action-cancel" onClick={{}}>
-              Hủy
-            </button>
-            <button id="crop-action-apply" onClick={handleMerge}>
-              Áp dụng
-            </button>
+            <button type="button" id="crop-action-cancel" onClick={handleCancel}>Hủy</button>
+            <button type="button" id="crop-action-apply" onClick={handleMerge} disabled={!currentImage}>Áp dụng</button>
           </div>
         </div>
       </section>

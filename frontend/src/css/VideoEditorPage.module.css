@@ -1,0 +1,95 @@
+.shell {
+  --ve-bg-0: #0d0f13;
+  --ve-bg-1: #111622;
+  --ve-bg-2: #181f2f;
+  --ve-border: #2c3342;
+  --ve-surface: #171b24;
+  --ve-surface-soft: #1f2633;
+  --ve-glow: rgba(96, 174, 255, 0.18);
+
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(310px, 26vw) 1fr;
+  grid-template-rows: 1fr auto;
+  background:
+    radial-gradient(1200px 420px at 80% -20%, rgba(81, 160, 255, 0.2), transparent 60%),
+    radial-gradient(900px 380px at 10% 120%, rgba(255, 145, 73, 0.15), transparent 60%),
+    linear-gradient(160deg, var(--ve-bg-0), var(--ve-bg-1) 50%, var(--ve-bg-2));
+}
+
+.sidebar {
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
+  border-right: 1px solid var(--ve-border);
+  background: linear-gradient(180deg, rgba(21, 27, 39, 0.95), rgba(15, 18, 26, 0.98));
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.mainPanel {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, rgba(13, 17, 24, 0.76), rgba(10, 13, 19, 0.86));
+  position: relative;
+}
+
+.mainPanel::before {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 18px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02), 0 18px 40px -30px var(--ve-glow);
+}
+
+.footer {
+  grid-column: 1 / span 2;
+  grid-row: 2;
+  min-height: 74px;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--ve-border);
+  background: linear-gradient(180deg, #171b25, #131720);
+  box-shadow: 0 -8px 20px -18px rgba(0, 0, 0, 0.8);
+}
+
+@media (max-width: 1100px) {
+  .shell {
+    grid-template-columns: minmax(280px, 36vw) 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 100svh;
+  }
+
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--ve-border);
+    max-height: 44svh;
+  }
+
+  .mainPanel {
+    min-height: 42svh;
+  }
+
+  .mainPanel::before {
+    inset: 8px;
+    border-radius: 14px;
+  }
+
+  .footer {
+    flex-wrap: wrap;
+    gap: 10px;
+    min-height: 82px;
+  }
+}

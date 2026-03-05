@@ -1,8 +1,8 @@
 /* pages/homePage.jsx */
 import { useState, useEffect, useRef, useContext } from "react";
 import ThemeContext from "@/constants/themes/ThemeContext";
-import Navbar from "@/components/Navbar";
-import Slideshow from "@/components/SlideShow";
+import Navbar from "@/components/navbar";
+import Slideshow from "@/components/Slideshow";
 import "../css/app.css";
 import Container from "@/components/Container";
 import HowToUse from "@/components/HowToUse";

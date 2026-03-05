@@ -1,94 +1,119 @@
-import React, { useState, useEffect, useContext } from "react";
-import Modal from "react-modal";
+// pages/image-editor.jsx  (or app/image-editor/page.jsx for App Router)
+import React, { useState, useContext } from "react";
+import Head from "next/head";
 import "../app/globals.css";
+import "../css/imageEditor.css";
 import MenuEditor from "@/components/MenuEditor";
 import FooterEditor from "@/components/FooterEditor";
 import ImageDisplay from "@/components/ImageDisplay";
 import "@fortawesome/fontawesome-free/css/all.min.css";
-import { ImageProvider } from "@/context/ImageContext";
+import { ImageProvider, ImageContext } from "@/context/ImageContext";
 import ImageUploader from "@/components/ImageUploader";
 import { ZoomProvider } from "@/context/ZoomContext";
+import { HiOutlineSparkles } from "react-icons/hi2";
+import { FiMenu } from "react-icons/fi";
 
-export default function ImageEditorPage() {
-  const [image, setImage] = useState(null);
-  const [imageData, setImageData] = useState({
-    width: 0,
-    height: 0,
-    top: 0,
-    left: 0,
-  });
+const MODE_LABELS = {
+  crop: "Cắt ảnh",
+  resize: "Thay đổi kích thước",
+  removebg: "Xóa & đổi nền",
+  adjust: "Điều chỉnh màu",
+  filter: "Bộ lọc màu",
+  retouch: "Làm đẹp da",
+  paint: "Vẽ trực tiếp",
+  "text-to-image": "Tạo ảnh AI",
+};
 
-  const [mode, setMode] = useState(""); // State để quản lý mode
+// ─── Inner component (needs access to ImageContext for error banner) ──────────
+function EditorContent() {
+  const [mode, setMode] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { error, clearError } = useContext(ImageContext);
 
-  const handleMode = (mode) => {
-    setMode(mode); // Nhận giá trị mode từ MenuEditor
-    console.log("Mode selected:", mode); // Kiểm tra xem mode có được cập nhật chính xác không
-  };
+  const modeLabel = MODE_LABELS[mode] || "Chọn công cụ để bắt đầu";
 
-  const [selectedImage, setSelectedImage] = useState(null);
-
-  const handleImageUpdate = (newImage) => {
-    setImage(newImage);
+  const handleModeChange = (nextMode) => {
+    setMode(nextMode);
+    if (nextMode) {
+      setMobileMenuOpen(false);
+    }
   };
 
   return (
-    
-    <ZoomProvider>
-      <ImageProvider>
-      <title>MultiTools | Công cụ chỉnh sửa hình ảnh</title>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            height: "100vh",
-            flex: 1,
-          }}
-        >
-          {/* Menu + Display */}
-          <div style={{ display: "flex", height: "90vh" }}>
-            {/* Menu */}
-            <div
-              style={{
-                width: "22em",
-                backgroundColor: "#2e2e2e",
-              }}
-            >
-              <MenuEditor
-                image={image}
-                onImageUpdate={handleImageUpdate}
-                imageData={imageData}
-                onMode={handleMode}
-              />
-            </div>
-            {/* Display */}
-            <div
-              style={{
-                flex: 1,
-                backgroundColor: "#2e2e2e",
-                position: "relative",
-                overflow: "hidden",
-              }}
-            >
-              <ImageDisplay
-                imageSrc={selectedImage}
-                mode={mode}
-                altText="Selected Image"
-              />
-            </div>
-          </div>
-          {/* Footer */}
-          <div
-            style={{
-              display: "flex",
-              flex: 1,
-              backgroundColor: "#292c31",
-            }}
-          >
-            <ImageUploader />
-            <FooterEditor />
-          </div>
+    <div className={`image-editor-shell ${mobileMenuOpen ? "ie-menu-open" : ""}`}>
+      {/* Global error banner */}
+      {error && (
+        <div className="ie-error-banner" role="alert">
+          <span className="ie-error-text">⚠ {error}</span>
+          <button onClick={clearError} className="ie-error-close" aria-label="Đóng thông báo lỗi">Đóng</button>
         </div>
-      </ImageProvider>
-    </ZoomProvider>
+      )}
+
+      {/* Main area */}
+      <div className="ie-layout">
+        <aside className="ie-sidebar-wrap">
+          <MenuEditor onMode={handleModeChange} />
+        </aside>
+
+        <button
+          type="button"
+          className="ie-mobile-overlay"
+          onClick={() => setMobileMenuOpen(false)}
+          aria-hidden={!mobileMenuOpen}
+          tabIndex={mobileMenuOpen ? 0 : -1}
+        />
+
+        <main className="ie-canvas-wrap">
+          <div className="ie-stage-header">
+            <button
+              type="button"
+              className="ie-mobile-menu-btn"
+              onClick={() => setMobileMenuOpen((v) => !v)}
+              aria-label="Mở bảng công cụ"
+            >
+              <FiMenu />
+              Công cụ
+            </button>
+
+            <div className="ie-stage-title">
+              <h1>Image Studio</h1>
+              <p>Thiết kế nhanh, chỉnh ảnh đẹp, xuất bản ngay.</p>
+            </div>
+
+            <div className={`ie-mode-chip ${mode ? "active" : ""}`}>
+              <HiOutlineSparkles />
+              {modeLabel}
+            </div>
+          </div>
+
+          <div className="ie-canvas-body">
+            <ImageDisplay mode={mode} />
+          </div>
+        </main>
+      </div>
+
+      {/* Footer */}
+      <div className="ie-footer">
+        <ImageUploader />
+        <FooterEditor />
+      </div>
+    </div>
+  );
+}
+
+// ─── Page ──────────────────────────────────────────────────────────────────────
+export default function ImageEditorPage() {
+  return (
+    <>
+      <Head>
+        <title>MultiTools | Chỉnh sửa hình ảnh</title>
+        <meta name="description" content="Công cụ chỉnh sửa hình ảnh trực tuyến" />
+      </Head>
+      <ZoomProvider>
+        <ImageProvider>
+          <EditorContent />
+        </ImageProvider>
+      </ZoomProvider>
+    </>
   );
 }

@@ -1,59 +1,98 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { TransformWrapper, TransformComponent, useTransformContext } from 'react-zoom-pan-pinch';
 
-// Tạo ngữ cảnh cho Zoom
-const ZoomContext = createContext();
+// ─── Context chỉ lưu ref đến API của TransformWrapper ────────────────────────
+const ZoomContext = createContext(null);
 
-// ZoomProvider bọc quanh các component con
+export const useZoom = () => useContext(ZoomContext);
+
+// ─── ZoomProvider: chỉ cung cấp context, KHÔNG bọc TransformWrapper ──────────
+// TransformWrapper và TransformComponent phải nằm cùng nhau trong ZoomableContent
 export const ZoomProvider = ({ children }) => {
-  const [isClient, setIsClient] = useState(false);
+  const apiRef = useRef({
+    zoomIn:         () => {},
+    zoomOut:        () => {},
+    resetTransform: () => {},
+    zoomToElement:  () => {},
+  });
+  const [scale, setScale] = useState(1);
 
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-
-  if (!isClient) {
-    return null; 
-  }
+  const value = useMemo(
+    () => ({
+      apiRef,
+      scale,
+      setScale,
+    }),
+    [scale]
+  );
 
   return (
-    <TransformWrapper
-      initialScale={1}
-      minScale={0.5}
-      maxScale={20}
-      limitToBounds={true}
-    >
-      {({ zoomIn, zoomOut, resetTransform,scale , positionX, positionY }) => (
-        <ZoomContext.Provider
-          value={{
-            zoomIn,
-            zoomOut,
-            resetTransform,
-            scale,
-            positionX,
-            positionY,
-          }}
-        >
-          {children}
-          {/* {isClient ? children : null} */}
-        </ZoomContext.Provider>
-      )}
-    </TransformWrapper>
+    <ZoomContext.Provider value={value}>
+      {children}
+    </ZoomContext.Provider>
   );
 };
 
-// Hook để sử dụng ngữ cảnh Zoom
-export const useZoom = () => useContext(ZoomContext);
+// ─── Nội bộ: lấy API từ TransformWrapper và ghi vào ref ─────────────────────
+const ZoomApiSync = () => {
+  const transformCtx = useTransformContext();
+  const zoom = useZoom();
 
-// Component chứa phần nội dung có thể zoom/pan
+  useEffect(() => {
+    if (!zoom || !transformCtx) return;
+    zoom.apiRef.current = {
+      zoomIn:         transformCtx.zoomIn,
+      zoomOut:        transformCtx.zoomOut,
+      resetTransform: transformCtx.resetTransform,
+      zoomToElement:  transformCtx.zoomToElement,
+      instance:       transformCtx.instance,
+    };
+  }, [zoom, transformCtx]);
+
+  const currentScale = transformCtx?.instance?.transformState?.scale ?? 1;
+
+  useEffect(() => {
+    if (!zoom) return;
+    zoom.setScale(currentScale);
+  }, [zoom, currentScale]);
+
+  return null;
+};
+
+// ─── ZoomableContent: TransformWrapper + TransformComponent luôn cùng nhau ───
 export const ZoomableContent = ({ children }) => {
-
   return (
-    <TransformComponent
-    wrapperStyle={{ overflow: "visible" }} // Ghi đè overflow thành visible
-    >
-      {children}
-    </TransformComponent>
+    <div className="ie-zoom-root">
+      <TransformWrapper
+        initialScale={1}
+        minScale={0.1}
+        maxScale={20}
+        limitToBounds={true}
+        centerOnInit={true}
+        wheel={{ step: 0.1 }}
+        doubleClick={{ mode: 'zoomIn', step: 0.7 }}
+        panning={{ velocityDisabled: false }}
+      >
+        {/* Đồng bộ API vào ZoomContext */}
+        <ZoomApiSync />
+
+        <TransformComponent
+          wrapperClass="ie-zoom-wrapper"
+          contentClass="ie-zoom-content"
+          wrapperStyle={{
+            width: '100%',
+            height: '100%',
+            overflow: 'hidden',
+          }}
+          contentStyle={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          {children}
+        </TransformComponent>
+      </TransformWrapper>
+    </div>
   );
 };

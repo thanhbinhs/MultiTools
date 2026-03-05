@@ -1,60 +1,74 @@
-import React, { createContext, useRef, useState } from 'react';
+// context/AudioContext.jsx
+import React, { createContext, useState, useRef, useCallback } from 'react';
 
 export const AudioContext = createContext();
 
 export const AudioProvider = ({ children }) => {
-    const audioRef = useRef(null); // Reference to the audio element
-    const gainNodeRef = useRef(null); // Reference to the GainNode
-    const [history, setHistory] = useState([]); // History of audio states
-    const [currentIndex, setCurrentIndex] = useState(0); // Current history index
-    const [mode, setMode] = useState("");
-    const [audioUrl, setAudioUrl] = useState(null);
-    const waveformRef = useRef(null); // Reference to waveform container
-    const wavesurferRef = useRef(null); // Reference to WaveSurfer instance
+  const [currentAudio, setCurrentAudio] = useState(null);
+  const [audioUrl, setAudioUrl] = useState(null);
+  const [mode, setMode] = useState('');
+  const [volume, setVolumeState] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [fileName, setFileName] = useState('');
 
-    const undo = () => {
-        if (currentIndex > 0) {
-            setCurrentIndex(currentIndex - 1);
-        }
+  const waveformRef = useRef(null);
+  const wavesurferRef = useRef(null);
+
+  const setInitialAudio = useCallback((file) => {
+    setCurrentAudio(file);
+    setIsReady(false);
+    setCurrentTime(0);
+    if (file instanceof File) {
+      setFileName(file.name);
     }
+  }, []);
 
-    const redo = () => {
-        if (currentIndex < history.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-        }
+  const setVolume = useCallback((val) => {
+    setVolumeState(val);
+    if (wavesurferRef.current) {
+      wavesurferRef.current.setVolume(val);
     }
+  }, []);
 
-    // Get currentAudio from history or null if no audio
-    const currentAudio =
-        history.length > 0 && currentIndex !== -1 ? history[currentIndex] : null;
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      if (wavesurferRef.current) {
+        wavesurferRef.current.setMuted(next);
+      }
+      return next;
+    });
+  }, []);
 
-    // Function to set the initial audio
-    const setInitialAudio = (audioFile) => {
-        setHistory([audioFile]); // Initialize history with the new audio
-        setCurrentIndex(0); // Set currentIndex to 0
-    };
-
-    return (
-        <AudioContext.Provider
-            value={{
-                audioRef,
-                gainNodeRef,
-                currentIndex,
-                mode,
-                setMode,
-                setInitialAudio,
-                undo,
-                redo,
-                currentAudio,
-                canUndo: currentIndex > 0,
-                canRedo: currentIndex < history.length - 1,
-                audioUrl,
-                setAudioUrl,
-                waveformRef,
-                wavesurferRef,
-            }}
-        >
-            {children}
-        </AudioContext.Provider>
-    );
-}
+  return (
+    <AudioContext.Provider
+      value={{
+        currentAudio,
+        setInitialAudio,
+        audioUrl,
+        setAudioUrl,
+        waveformRef,
+        wavesurferRef,
+        mode,
+        setMode,
+        volume,
+        setVolume,
+        isMuted,
+        toggleMute,
+        isReady,
+        setIsReady,
+        duration,
+        setDuration,
+        currentTime,
+        setCurrentTime,
+        fileName,
+        setFileName,
+      }}
+    >
+      {children}
+    </AudioContext.Provider>
+  );
+};

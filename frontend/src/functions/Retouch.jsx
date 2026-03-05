@@ -1,52 +1,76 @@
+// ============================================================
+// functions/Retouch.jsx
+// ============================================================
 import React, { useContext, useState } from "react";
+import { FaTimes, FaSpinner } from "react-icons/fa";
+import { MdFaceRetouchingNatural } from "react-icons/md";
 import { ImageContext } from "@/context/ImageContext";
 import "../css/menuEditor.css";
-import { FaRobot, FaTimes, FaSpinner } from "react-icons/fa";
-import { FaAngleDown } from "react-icons/fa6";
-import { Autocomplete, AutocompleteItem } from "@nextui-org/react";
-import { MdFaceRetouchingNatural } from "react-icons/md";
 
-export default function Retouch() {
-  const { handleRetouchSkin } =
-    useContext(ImageContext);
+export function Retouch({ onClose }) {
+  const { handleRetouchSkin, currentImage } = useContext(ImageContext);
   const [loading, setLoading] = useState(false);
-
-
+  const [done,    setDone]    = useState(false);
+  const [error, setError] = useState(null);
 
   const handleClick = async () => {
+    if (!currentImage || loading) return;
     setLoading(true);
+    setDone(false);
+    setError(null);
     try {
       await handleRetouchSkin();
-    } catch (error) {
-      console.error("Lỗi khi xóa nền:", error);
+      setDone(true);
+    } catch (err) {
+      setError(err?.message || "Không thể làm đẹp da");
+      console.error("Retouch error:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
-
-
-
 
   return (
     <section className="tool-drawer">
       <div className="tool-name">
-        <div></div>
-        Làm đẹp
-        <button onClick={() => {}} className="icon-cancel" id="icon-cancel">
+        <div />
+        Làm đẹp da
+        <button type="button" onClick={() => onClose?.()} className="icon-cancel">
           <FaTimes />
         </button>
       </div>
-      <div className="splitter"></div>
-      <div className="box--basic" onClick={handleClick}>
-        {loading ? (
-          <>
-            <FaSpinner className="removebg-icon spinner" /> Đang sửa ảnh...
-          </>
-        ) : (
-          <>
-            <MdFaceRetouchingNatural className="removebg-icon" /> Làm đẹp cơ bản
-          </>
-        )}
-      </div>
+      <div className="splitter" />
+
+      {!currentImage && (
+        <p className="ie-empty-message">Chưa có ảnh để xử lý.</p>
+      )}
+
+      {done && (
+        <div className="ie-feedback ie-feedback--success">
+          Làm đẹp thành công!
+        </div>
+      )}
+      {error && (
+        <div className="ie-feedback ie-feedback--error">
+          {error}
+        </div>
+      )}
+
+      {currentImage && (
+        <button
+          type="button"
+          className="box--basic"
+          onClick={loading ? undefined : handleClick}
+          style={{ cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}
+          disabled={loading}
+        >
+          {loading
+            ? <><FaSpinner className="removebg-icon spinner" /> Đang xử lý…</>
+            : <><MdFaceRetouchingNatural className="removebg-icon" /> Làm đẹp da cơ bản</>
+          }
+        </button>
+      )}
     </section>
   );
 }
+
+export default Retouch;
